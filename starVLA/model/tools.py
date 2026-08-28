@@ -253,18 +253,26 @@ class FrameworkTools:
         Steps:
             1. Clamp to [-1, 1]
             2. Threshold gripper channel to binary {0, 1}
-            3. Linear rescale masked dims: ``original = 0.5*(norm+1)*(q99-q01) + q01``
+            3. Linear rescale masked dims: ``original = 0.5*(norm+1)*(high-low) + low``
+
+        Bounds are ``min``/``max`` when present (gr00t_sharded min-max), otherwise
+        ``q01``/``q99`` (legacy lerobot_datasets q99).
 
         Args:
             normalized_actions: ``[T, action_dim]`` array.
-            action_norm_stats: Dict with ``q01``, ``q99``, optional ``mask``.
+            action_norm_stats: Dict with ``min``/``max`` or ``q01``/``q99``, optional ``mask``.
             gripper_channel_idx: Which channel is the binary gripper (default 6 for 7-DoF).
 
         Returns:
             Unnormalized actions (same shape).
         """
-        mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["q01"], dtype=bool))
-        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(action_norm_stats["q01"])
+        if "min" in action_norm_stats and "max" in action_norm_stats:
+            action_low = np.array(action_norm_stats["min"])
+            action_high = np.array(action_norm_stats["max"])
+        else:
+            action_low = np.array(action_norm_stats["q01"])
+            action_high = np.array(action_norm_stats["q99"])
+        mask = action_norm_stats.get("mask", np.ones_like(action_low, dtype=bool))
         normalized_actions = np.clip(normalized_actions, -1, 1)
         if 0 <= gripper_channel_idx < normalized_actions.shape[-1]:
             normalized_actions[:, gripper_channel_idx] = np.where(
