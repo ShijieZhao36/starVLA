@@ -32,7 +32,7 @@ datasets:
     per_device_batch_size: 4
 
   vla_data:
-    # Switch to `gr00t_sharded` to use GR00T sharded I/O (torchcodec; abs min-max).
+    # Switch to `gr00t_sharded` to use GR00T sharded I/O (torchcodec; abs q01/q99 by default).
     dataset_py: lerobot_datasets
     data_root_dir: playground/Datasets/LEROBOT_LIBERO_DATA
     data_mix: libero_all # libero_goal

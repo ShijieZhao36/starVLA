@@ -3,8 +3,9 @@
 
 """Pack GR00T ``VLAStepData`` into the starVLA sample dict.
 
-Applies absolute min-max normalization via GR00T ``StateActionProcessor``
-(no relative EEF conversion) and leaves Qwen tokenization to ``forward()``.
+Applies absolute q01/q99 (or min-max) normalization via GR00T
+``StateActionProcessor`` (no relative EEF conversion) and leaves Qwen
+tokenization to ``forward()``.
 """
 
 from __future__ import annotations
@@ -74,11 +75,12 @@ class StarVLAPackProcessor(BaseProcessor):
         modality_configs: dict[str, dict[str, ModalityConfig]],
         statistics: dict | None = None,
         include_state: bool = False,
-        use_percentiles: bool = False,
+        use_percentiles: bool = True,
         clip_outliers: bool = True,
     ):
         self.modality_configs = parse_modality_configs(modality_configs)
         self.include_state = include_state
+        self.use_percentiles = use_percentiles
         self.state_action_processor = StateActionProcessor(
             modality_configs=self.modality_configs,
             statistics=statistics,

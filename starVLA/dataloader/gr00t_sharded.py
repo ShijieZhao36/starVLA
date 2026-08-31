@@ -89,6 +89,7 @@ class Gr00tShardedMixture(IterableDataset):
         payload = freeze_concat_statistics(
             self.get_dataset_statistics(),
             self.processor.modality_configs,
+            use_percentiles=bool(getattr(self.processor, "use_percentiles", True)),
         )
         with open(save_path, "w") as f:
             json.dump(_jsonify(payload), f, indent=2)
@@ -124,6 +125,7 @@ def _as_list(value: Any) -> list:
 def freeze_concat_statistics(
     global_stats: dict,
     modality_configs: dict[str, dict[str, Gr00tModalityConfig]],
+    use_percentiles: bool = True,
 ) -> dict:
     """Flatten per-group GR00T stats into concat vectors keyed by embodiment tag."""
     frozen = {}
@@ -146,6 +148,7 @@ def freeze_concat_statistics(
                         combined[name].extend(_as_list(group[name]))
             if combined["min"]:
                 combined["mask"] = [True] * len(combined["min"])
+                combined["use_percentiles"] = bool(use_percentiles)
                 tag_out[out_name] = combined
         if tag_out:
             frozen[tag] = tag_out
@@ -237,6 +240,16 @@ def _include_state(data_cfg) -> bool:
     return _cfg_get(data_cfg, "include_state", False) not in ["False", False]
 
 
+def _as_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "0", "no", "off"}
+    return bool(value)
+
+
 def get_vla_dataset(
     data_cfg,
     mode: str = "train",
@@ -265,6 +278,11 @@ def get_vla_dataset(
     allow_padding = bool(_cfg_get(data_cfg, "allow_padding", False))
     num_shards_per_epoch = int(_cfg_get(data_cfg, "num_shards_per_epoch", int(1e5)))
     include_state = _include_state(data_cfg)
+    use_percentiles = _as_bool(_cfg_get(data_cfg, "use_percentiles", True), default=True)
+    logger.info(
+        "[gr00t_sharded] action/state bounds=%s (YAML use_percentiles)",
+        "q01/q99" if use_percentiles else "min/max",
+    )
 
     included = set()
     filtered = []
@@ -312,7 +330,7 @@ def get_vla_dataset(
     processor = StarVLAPackProcessor(
         modality_configs=processor_modality_configs,
         include_state=include_state,
-        use_percentiles=False,
+        use_percentiles=use_percentiles,
         clip_outliers=True,
     )
     mixture = ShardedMixtureDataset(

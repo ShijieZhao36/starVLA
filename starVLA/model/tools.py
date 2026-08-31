@@ -255,18 +255,26 @@ class FrameworkTools:
             2. Threshold gripper channel to binary {0, 1}
             3. Linear rescale masked dims: ``original = 0.5*(norm+1)*(high-low) + low``
 
-        Bounds are ``min``/``max`` when present (gr00t_sharded min-max), otherwise
-        ``q01``/``q99`` (legacy lerobot_datasets q99).
+        Bounds follow training: ``q01``/``q99`` unless ``use_percentiles`` is
+        explicitly false, in which case ``min``/``max`` are used. Legacy
+        ``dataset_statistics.json`` files have no flag and keep q99 behavior.
 
         Args:
             normalized_actions: ``[T, action_dim]`` array.
-            action_norm_stats: Dict with ``min``/``max`` or ``q01``/``q99``, optional ``mask``.
+            action_norm_stats: Dict with ``q01``/``q99`` and/or ``min``/``max``,
+                optional ``mask`` and ``use_percentiles``.
             gripper_channel_idx: Which channel is the binary gripper (default 6 for 7-DoF).
 
         Returns:
             Unnormalized actions (same shape).
         """
-        if "min" in action_norm_stats and "max" in action_norm_stats:
+        use_percentiles = action_norm_stats.get("use_percentiles", True)
+        if isinstance(use_percentiles, str):
+            use_percentiles = use_percentiles.strip().lower() not in {"false", "0", "no", "off"}
+        if use_percentiles and "q01" in action_norm_stats and "q99" in action_norm_stats:
+            action_low = np.array(action_norm_stats["q01"])
+            action_high = np.array(action_norm_stats["q99"])
+        elif "min" in action_norm_stats and "max" in action_norm_stats:
             action_low = np.array(action_norm_stats["min"])
             action_high = np.array(action_norm_stats["max"])
         else:
