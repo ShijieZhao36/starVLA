@@ -50,6 +50,27 @@ def _training_obs_image_size(model_cfg: Dict[str, Any]) -> Optional[List[int]]:
     return [int(size[0]), int(size[1])]
 
 
+def _action_chunk_size_from_cfg(framework_cfg: Dict[str, Any], ckpt_path: str) -> int:
+    """Resolve action chunk length from Qwen-style or PI0/PI05 configs.
+
+    Lookup order:
+      1. ``framework.action_model.action_horizon``
+      2. ``framework.action_model.future_action_window_size + 1``
+      3. ``framework.action_horizon`` (PI0 / PI05)
+    """
+    action_model_cfg = framework_cfg.get("action_model") or {}
+    if "action_horizon" in action_model_cfg:
+        return int(action_model_cfg["action_horizon"])
+    if "future_action_window_size" in action_model_cfg:
+        return int(action_model_cfg["future_action_window_size"]) + 1
+    if "action_horizon" in framework_cfg:
+        return int(framework_cfg["action_horizon"])
+    raise ValueError(
+        f"PolicyServerWrapper: no action_horizon or future_action_window_size "
+        f"found in model config for {ckpt_path}"
+    )
+
+
 class PolicyServerWrapper:
     """Wraps a `baseframework` for use as a websocket-server policy."""
 
@@ -75,17 +96,9 @@ class PolicyServerWrapper:
         model_cfg = merge_config_overrides(model_cfg, config_overrides)
         self._model_cfg = model_cfg
 
-        # action_chunk_size = future_action_window_size + 1 (matches old client).
-        action_model_cfg = model_cfg["framework"]["action_model"]
-
-        if "action_horizon" in action_model_cfg:
-            self._action_chunk_size = int(action_model_cfg["action_horizon"])
-        elif "future_action_window_size" in action_model_cfg:
-            self._action_chunk_size = int(action_model_cfg["future_action_window_size"]) + 1
-        else:
-            raise ValueError(
-                f"PolicyServerWrapper: no action_horizon or future_action_window_size found in model config for {self._ckpt_path}"
-            )
+        self._action_chunk_size = _action_chunk_size_from_cfg(
+            model_cfg.get("framework") or {}, self._ckpt_path
+        )
         # Cache of PolicyNormProcessor instances per unnorm_key.
         # For single-dataset ckpts unnorm_key is auto-selected; for multi-dataset
         # ckpts clients must pass unnorm_key per request.
