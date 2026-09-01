@@ -190,6 +190,18 @@ class PolicyServerWrapper:
         out = self._framework.predict_action(examples=examples, **kwargs)
         normalized = np.asarray(out["normalized_actions"])  # (B, T, D)
 
+        # PI0/PI05 heads emit a padded action_dim (typically 32). Training-time
+        # DataConfig keys only cover the real embodiment dim (e.g. 14 for ARX).
+        real_action_dim = sum(proc.action_key_dims[key] for key in proc.action_keys)
+        if normalized.shape[-1] > real_action_dim:
+            normalized = normalized[..., :real_action_dim]
+        elif normalized.shape[-1] < real_action_dim:
+            raise ValueError(
+                f"predict_action: model output dim {normalized.shape[-1]} is smaller than "
+                f"DataConfig action dim {real_action_dim} "
+                f"(action_keys={proc.action_keys}, action_key_dims={proc.action_key_dims})."
+            )
+
         unnorm = np.stack(
             [proc.unapply_actions(normalized[b]) for b in range(normalized.shape[0])],
             axis=0,

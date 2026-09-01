@@ -355,6 +355,55 @@ class PolicyNormProcessor:
         return self._transform
 
     # ------------------------------------------------------------------
+    # Forward path (raw env state → model input)
+    # ------------------------------------------------------------------
+    def apply_state(self, raw_state: np.ndarray) -> np.ndarray:
+        """Normalize a flat state vector with the training-time transform.
+
+        Args:
+            raw_state: shape ``(D,)``, ``(1, D)``, or ``(T, D)`` where
+                ``D == sum(state_key_dims.values())``.
+
+        Returns:
+            Same leading shape as the input, last dim ``D``, q99/min-max
+            normalized to match training.
+        """
+        raw_state = np.asarray(raw_state, dtype=np.float32)
+        squeezed = False
+        if raw_state.ndim == 1:
+            raw_state = raw_state[None, :]
+            squeezed = True
+        if raw_state.ndim != 2:
+            raise ValueError(f"Expected (D,) or (T, D) state; got shape {raw_state.shape}")
+
+        expected_dim = sum(self._state_key_dims.get(key, 1) for key in self._state_keys)
+        if raw_state.shape[-1] != expected_dim:
+            raise ValueError(
+                f"State dim {raw_state.shape[-1]} != sum(state_key_dims) {expected_dim}. "
+                f"state_keys={self._state_keys}, state_key_dims={self._state_key_dims}"
+            )
+
+        data: Dict[str, np.ndarray] = {}
+        cursor = 0
+        for full_key in self._state_keys:
+            dim_k = self._state_key_dims.get(full_key, 1)
+            data[full_key] = np.asarray(raw_state[..., cursor : cursor + dim_k], dtype=np.float32)
+            cursor += dim_k
+
+        out = self._transform.apply(data)
+
+        parts: List[np.ndarray] = []
+        for full_key in self._state_keys:
+            value = out[full_key]
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            parts.append(np.asarray(value, dtype=np.float32))
+        normalized = np.concatenate(parts, axis=-1)
+        if squeezed:
+            return normalized[0]
+        return normalized
+
+    # ------------------------------------------------------------------
     # Inverse path (model output → env action)
     # ------------------------------------------------------------------
     def unapply_actions(self, normalized_actions: np.ndarray) -> np.ndarray:
