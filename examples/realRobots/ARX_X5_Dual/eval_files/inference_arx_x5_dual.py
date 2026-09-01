@@ -7,10 +7,11 @@ Control loop (pull / blocking, not RTC):
   3. Block on the Policy Server until a full action chunk returns.
   4. Execute the chunk step-by-step with dual-arm send_joint.
 
-Hardware clients come from Evo-RL (set EVO_RL_ROOT or --evo-rl-root). Keyboard
-hotkeys: [R] start, [Space] e-stop, [H] home, [I] next chunk in --safe-mode, [Q] quit.
+Arms use the official ARX X5 SDK (`ARX_SDK_ROOT` / `--arx-sdk-root`); cameras use
+pyrealsense2 (or OpenCV USB). Keyboard hotkeys: [R] start, [Space] e-stop,
+[H] home, [I] next chunk in --safe-mode, [Q] quit.
 
-State / action layout matches training DataConfig (NOT Evo-RL's right-then-left):
+State / action layout matches training DataConfig:
   [left_j1..j6, left_grip, right_j1..j6, right_grip]
 Camera order matches PI05 image_keys: front, left_wrist, right_wrist.
 """
@@ -19,9 +20,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import dataclasses
 import logging
-import os
 import queue
 import select
 import sys
@@ -57,42 +56,9 @@ def _ensure_starvla_on_path() -> None:
     root = str(_repo_root())
     if root not in sys.path:
         sys.path.insert(0, root)
-
-
-def _resolve_evo_rl_src(evo_rl_root: Path | None) -> Path | None:
-    if evo_rl_root is not None:
-        src = evo_rl_root.expanduser().resolve()
-        if (src / "lerobot").is_dir():
-            return src
-        if (src / "src" / "lerobot").is_dir():
-            return src / "src"
-        raise FileNotFoundError(f"No lerobot package under --evo-rl-root={evo_rl_root}")
-
-    env_root = os.environ.get("EVO_RL_ROOT")
-    if env_root:
-        src = Path(env_root).expanduser().resolve()
-        if (src / "lerobot").is_dir():
-            return src
-        if (src / "src" / "lerobot").is_dir():
-            return src / "src"
-
-    sibling = Path.home() / "workspace" / "Evo-RL" / "src"
-    if (sibling / "lerobot").is_dir():
-        return sibling
-    return None
-
-
-def _ensure_evo_rl_on_path(evo_rl_root: Path | None) -> Path:
-    src = _resolve_evo_rl_src(evo_rl_root)
-    if src is None:
-        raise FileNotFoundError(
-            "Evo-RL not found. Set EVO_RL_ROOT or pass --evo-rl-root pointing at "
-            "the Evo-RL repo (or its src/ directory)."
-        )
-    src_str = str(src)
-    if src_str not in sys.path:
-        sys.path.insert(0, src_str)
-    return src
+    eval_dir = str(Path(__file__).resolve().parent)
+    if eval_dir not in sys.path:
+        sys.path.insert(0, eval_dir)
 
 
 class LoopState(Enum):
@@ -101,7 +67,7 @@ class LoopState(Enum):
 
 
 class KeyboardListener:
-    """Non-blocking keyboard input for Linux terminals (same idea as Evo-RL)."""
+    """Non-blocking keyboard input for Linux terminals."""
 
     def __init__(self) -> None:
         self._queue: queue.Queue[str] = queue.Queue()
@@ -179,47 +145,6 @@ def _parse_camera_specs(specs: list[str]) -> dict[str, str]:
         name, value = spec.split(":", 1)
         mapping[name.strip()] = value.strip()
     return mapping
-
-
-def _make_camera_configs(
-    *,
-    camera_specs: dict[str, str],
-    use_usb_cams: bool,
-    width: int,
-    height: int,
-    fps: int,
-    flipped_cameras: set[str],
-) -> dict[str, Any]:
-    from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-    from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
-
-    configs: dict[str, Any] = {}
-    for name in CAMERA_SLOT_NAMES:
-        if name not in camera_specs:
-            raise ValueError(
-                f"Missing camera spec for slot '{name}'. Required: {list(CAMERA_SLOT_NAMES)}. "
-                f"Pass e.g. --cameras {name}:<serial>."
-            )
-        source = camera_specs[name]
-        rotation = 180 if name in flipped_cameras else 0
-        if use_usb_cams:
-            configs[name] = OpenCVCameraConfig(
-                index_or_path=int(source),
-                width=width,
-                height=height,
-                fps=fps,
-                rotation=rotation,
-            )
-        else:
-            configs[name] = RealSenseCameraConfig(
-                serial_number_or_name=source,
-                width=width,
-                height=height,
-                fps=fps,
-                use_depth=False,
-                rotation=rotation,
-            )
-    return configs
 
 
 def _read_dual_state(left_arm: Any, right_arm: Any) -> np.ndarray:
@@ -435,7 +360,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unnorm-key", type=str, default=None)
     parser.add_argument("--execution-horizon", type=int, default=None)
     parser.add_argument("--duration", type=float, default=0.1, help="Seconds per executed action.")
-    parser.add_argument("--evo-rl-root", type=Path, default=None)
+    parser.add_argument(
+        "--arx-sdk-root",
+        type=Path,
+        default=None,
+        help="Official ARX X5 Python SDK root (bimanual.SingleArm). Defaults to ARX_SDK_ROOT or ~/workspace/ARX_X5/py/arx_x5_python.",
+    )
     parser.add_argument("--left-can-port", type=str, default=DEFAULT_LEFT_CAN_PORT)
     parser.add_argument("--right-can-port", type=str, default=DEFAULT_RIGHT_CAN_PORT)
     parser.add_argument("--arm-type", type=int, default=0, choices=[0, 1, 2])
@@ -467,45 +397,38 @@ def main() -> None:
         raise SystemExit("--safe-mode requires keyboard control.")
 
     _ensure_starvla_on_path()
-    evo_src = _ensure_evo_rl_on_path(args.evo_rl_root)
-    LOGGER.info("Using Evo-RL package from %s", evo_src)
 
-    from lerobot.cameras.utils import make_cameras_from_configs
-    from lerobot.robots.arx5_follower.arx5_client import ARX5ArmClient
-    from lerobot.robots.arx5_follower.config_arx5_follower import ARX5FollowerConfigBase
-
+    from arx_sdk import ARX5ArmClient, GRIPPER_MAX, GRIPPER_MIN, DEFAULT_ARX_SDK_ROOT
+    from cameras import make_cameras
     from deployment.model_server.policy_norm_processor import PolicyNormProcessor
     from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
 
-    gripper_min = float(next(f.default for f in dataclasses.fields(ARX5FollowerConfigBase) if f.name == "gripper_min"))
-    gripper_max = float(next(f.default for f in dataclasses.fields(ARX5FollowerConfigBase) if f.name == "gripper_max"))
-    LOGGER.info("ARX5 gripper range: [%.3f, %.3f]", gripper_min, gripper_max)
+    sdk_root = args.arx_sdk_root.expanduser() if args.arx_sdk_root is not None else DEFAULT_ARX_SDK_ROOT
+    LOGGER.info("ARX SDK root: %s", sdk_root)
+    LOGGER.info("ARX5 gripper range: [%.3f, %.3f]", GRIPPER_MIN, GRIPPER_MAX)
 
     cameras: dict[str, Any] | None = None
-    camera_configs = None
     if not args.use_stub:
-        camera_specs = _parse_camera_specs(args.cameras)
-        camera_configs = _make_camera_configs(
-            camera_specs=camera_specs,
-            use_usb_cams=args.use_usb_cams,
+        cameras = make_cameras(
+            _parse_camera_specs(args.cameras),
+            use_usb=args.use_usb_cams,
             width=args.cam_width,
             height=args.cam_height,
             fps=args.fps,
-            flipped_cameras=set(args.flip_cameras),
+            flipped=set(args.flip_cameras),
         )
-        cameras = make_cameras_from_configs(camera_configs)
 
     left_arm = ARX5ArmClient(
         can_port=args.left_can_port,
         arm_type=args.arm_type,
         use_stub=args.use_stub,
-        recorded_pose_path=Path("checkpoints/left_recorded_pose.json"),
+        sdk_root=sdk_root,
     )
     right_arm = ARX5ArmClient(
         can_port=args.right_can_port,
         arm_type=args.arm_type,
         use_stub=args.use_stub,
-        recorded_pose_path=Path("checkpoints/right_recorded_pose.json"),
+        sdk_root=sdk_root,
     )
 
     LOGGER.info("Connecting to StarVLA policy server %s:%s", args.host, args.port)
