@@ -94,6 +94,15 @@ def _resolve_robot_type(
     )
 
 
+def _is_combined_stat_array(stat_name: str, value: Any) -> bool:
+    """True for numeric stat vectors (q01/q99/min/max/...); skip mask and scalars."""
+    if stat_name == "mask":
+        return False
+    if isinstance(value, (bool, int, float, str, bytes)):
+        return False
+    return hasattr(value, "__len__")
+
+
 def _infer_key_dims(
     data_config: Any,
     combined_stats: Dict[str, Any],
@@ -125,7 +134,9 @@ def _infer_key_dims(
         return dict(getattr(data_config, attr))
 
     combined = combined_stats.get(modality, {})
-    stat_arr = next((v for k, v in combined.items() if k != "mask"), None)
+    if not combined and modality == "state":
+        combined = combined_stats.get("proprio", {})
+    stat_arr = next((v for k, v in combined.items() if _is_combined_stat_array(k, v)), None)
     n_keys = len(modality_keys)
     if stat_arr is not None and n_keys > 0:
         D_total = len(stat_arr)
@@ -196,7 +207,7 @@ def _build_dataset_metadata(
             dim_k = key_dims.get(full_key, 1)
             per_key: Dict[str, List[float]] = {}
             for stat_name, arr in combined.items():
-                if stat_name == "mask":
+                if not _is_combined_stat_array(stat_name, arr):
                     continue
                 end = cursor + dim_k
                 if end > len(arr):
@@ -215,7 +226,7 @@ def _build_dataset_metadata(
         return stats_per_subkey, meta_per_subkey
 
     action_combined = stats_for_key.get("action", {})
-    state_combined = stats_for_key.get("state", {})
+    state_combined = stats_for_key.get("state") or stats_for_key.get("proprio") or {}
 
     action_stats, action_meta = _split_combined(action_combined, action_keys, action_key_dims)
 
