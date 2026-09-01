@@ -9,7 +9,8 @@ Control loop (pull / blocking, not RTC):
 
 Arms use the official ARX X5 SDK (`ARX_SDK_ROOT` / `--arx-sdk-root`); cameras use
 pyrealsense2 (or OpenCV USB). Keyboard hotkeys: [R] start, [Space] e-stop,
-[H] home, [I] next chunk in --safe-mode, [Q] quit.
+[H] home, [Y]/[U] left gripper open/close, [O]/[P] right gripper open/close
+(STOPPED only), [I] next chunk in --safe-mode, [Q] quit.
 
 State / action layout matches training DataConfig:
   [left_j1..j6, left_grip, right_j1..j6, right_grip]
@@ -215,11 +216,22 @@ def _clip_safe_actions(
 
 def _log_keyboard_help(safe_mode: bool) -> None:
     message = (
-        "Keyboard: [Space] e-stop | [H] home | [R] start inference | [Q] quit"
+        "Keyboard: [Space] e-stop | [H] home | [R] start inference | [Q] quit "
+        "| [Y]/[U] left grip open/close | [O]/[P] right grip open/close"
     )
     if safe_mode:
         message += " | [I] next chunk"
     LOGGER.info(message)
+
+
+def _set_gripper(arm: Any, *, open_gripper: bool) -> None:
+    from arx_sdk import GRIPPER_MAX, GRIPPER_MIN
+
+    pose = list(arm.get_state())[:7]
+    if len(pose) < 7:
+        pose.extend([0.0] * (7 - len(pose)))
+    pose[6] = GRIPPER_MAX if open_gripper else GRIPPER_MIN
+    arm.send_joint(pose)
 
 
 def _run_keyboard_command(
@@ -240,6 +252,33 @@ def _run_keyboard_command(
     if key == "q":
         LOGGER.info("Quit requested.")
         return state, request_next_chunk, False
+    if key in {"y", "u", "o", "p"}:
+        labels = {
+            "y": "open left gripper",
+            "u": "close left gripper",
+            "o": "open right gripper",
+            "p": "close right gripper",
+        }
+        if state != LoopState.STOPPED:
+            LOGGER.warning(
+                "[%s] ignored: %s only in STOPPED. Press [Space] first.",
+                key.upper(),
+                labels[key],
+            )
+            return state, request_next_chunk, True
+        if key == "y":
+            _set_gripper(left_arm, open_gripper=True)
+            LOGGER.info("Opened left gripper (Y).")
+        elif key == "u":
+            _set_gripper(left_arm, open_gripper=False)
+            LOGGER.info("Closed left gripper (U).")
+        elif key == "o":
+            _set_gripper(right_arm, open_gripper=True)
+            LOGGER.info("Opened right gripper (O).")
+        else:
+            _set_gripper(right_arm, open_gripper=False)
+            LOGGER.info("Closed right gripper (P).")
+        return state, request_next_chunk, True
     if state == LoopState.STOPPED:
         if key == "h":
             LOGGER.info("Homing both ARX5 arms.")
