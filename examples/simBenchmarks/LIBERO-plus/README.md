@@ -41,10 +41,21 @@ To set up the environment, please first follow the official [LIBERO-plus reposit
 
 
 
-Afterwards, inside the `LIBERO-plus` environment, install the following dependencies:  
+Afterwards, inside the `LIBERO-plus` environment, install the following dependencies:
 
 ```bash
-pip install tyro matplotlib mediapy websockets msgpack
+apt-get install -y libosmesa6 libosmesa6-dev libmagickwand-dev libegl1
+pip install tyro matplotlib mediapy websockets msgpack tqdm PyYAML
+pip install numpy==1.24.4 mujoco==3.2.3
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+pip install robosuite==1.4.0 gym==0.25.2 bddl==1.0.1 easydict==1.9 opencv-python==4.6.0.66 cloudpickle==2.1.0 termcolor future==0.18.2
+```
+
+进程内加载 checkpoint（`parallel_eval/eval_libero_model.py`，包括 8 卡脚本）还会用到 StarVLA 的模型栈。`torchvision` 必须和上面的 CUDA 版 `torch` 配套，装完后再把 `numpy` / `mujoco` 钉回仿真环境的版本：
+
+```bash
+pip install draccus==0.8.0 omegaconf transformers==4.57.0 accelerate==1.5.2 einops safetensors huggingface_hub diffusers qwen-vl-utils rich timm
+pip install torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install numpy==1.24.4 mujoco==3.2.3
 ```
 
@@ -65,7 +76,9 @@ In the first terminal, activate the `starVLA` conda environment and run:
 bash examples/simBenchmarks/LIBERO-plus/eval_files/run_policy_server.sh
 ```
 
-⚠️ **Note:** Please ensure that you specify the correct checkpoint path in `examples/simBenchmarks/LIBERO-plus/eval_files/run_policy_server.sh`  
+⚠️ **Note:** Please ensure that you specify the correct checkpoint path in `examples/simBenchmarks/LIBERO-plus/eval_files/run_policy_server.sh`
+
+The default checkpoint `Qwen3-VL-PI-LIBERO-4in1` was trained with the historical LayerwiseFM forward. `run_policy_server.sh` and `parallel_eval/run_libero_plus_8gpu.sh` pass `use_canonical_forward=false` by default. Set `USE_CANONICAL_FORWARD=true` only for a checkpoint trained with the canonical interleaved DiT.  
 
 
 ---

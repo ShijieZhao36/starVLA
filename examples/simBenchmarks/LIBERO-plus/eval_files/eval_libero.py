@@ -1,12 +1,14 @@
+import atexit
 import dataclasses
 import json
 import logging
 import math
 import os
 import pathlib
+import queue
+import threading
 import time
 
-import imageio
 import numpy as np
 import tqdm
 import tyro
@@ -57,6 +59,69 @@ class Args:
     job_name: str = "test"
 
 
+def _encode_replay_video(video_path, frames) -> None:
+    """Write every replay frame. Prefer one-thread ultrafast H.264; fall back to mpeg4."""
+    import av
+
+    arrays = [np.asarray(frame) for frame in frames]
+    if not arrays:
+        return
+    height, width = arrays[0].shape[:2]
+    codec = "libx264"
+    try:
+        av.Codec(codec, "w")
+    except Exception:
+        codec = "mpeg4"
+    container = av.open(str(video_path), mode="w")
+    try:
+        stream = container.add_stream(codec, rate=25)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuv420p"
+        if codec == "libx264":
+            stream.options = {"preset": "ultrafast", "threads": "1"}
+        stream.codec_context.thread_count = 1
+        stream.codec_context.thread_type = av.codec.context.ThreadType.NONE
+        for array in arrays:
+            video_frame = av.VideoFrame.from_ndarray(array, format="rgb24")
+            for packet in stream.encode(video_frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    finally:
+        container.close()
+
+
+def _start_video_writer():
+    """Encode replay mp4s on one background thread so the next episode can start."""
+    video_queue = queue.Queue(maxsize=4)
+
+    def _loop():
+        while True:
+            item = video_queue.get()
+            if item is None:
+                break
+            video_path, frames = item
+            try:
+                _encode_replay_video(video_path, frames)
+            except Exception as exc:
+                logging.warning(f"Failed to write replay video {video_path}: {exc}")
+
+    thread = threading.Thread(target=_loop, name="replay-video-writer")
+    thread.start()
+
+    def _shutdown():
+        if thread._replay_shutdown:
+            return
+        thread._replay_shutdown = True
+        video_queue.put(None)
+        thread.join()
+
+    thread._replay_shutdown = False
+    atexit.register(_shutdown)
+    return video_queue, thread
+
+
 def eval_libero(args: Args) -> None:
     logging.info(f"Arguments: {json.dumps(dataclasses.asdict(args), indent=4)}")
 
@@ -72,6 +137,7 @@ def eval_libero(args: Args) -> None:
     # args.video_out_path = f"{date_base}+{args.job_name}"
 
     pathlib.Path(args.video_out_path).mkdir(parents=True, exist_ok=True)
+    video_queue, video_thread = _start_video_writer()
 
     if args.task_suite_name == "libero_spatial":
         max_steps = 220  # longest training demo has 193 steps
@@ -87,7 +153,6 @@ def eval_libero(args: Args) -> None:
         raise ValueError(f"Unknown task suite: {args.task_suite_name}")
 
     client_model = ModelClient(
-        policy_ckpt_path=args.pretrained_path,  # to get unnormalization stats
         host=args.host,
         port=args.port,
         image_size=args.resize_size,
@@ -156,8 +221,6 @@ def eval_libero(args: Args) -> None:
                 # IMPORTANT: rotate 180 degrees to match train preprocessing
                 img = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
                 wrist_img = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
-
-                # Save preprocessed image for replay video
                 replay_images.append(img)
 
                 state = np.concatenate(
@@ -226,21 +289,13 @@ def eval_libero(args: Args) -> None:
             task_episodes += 1
             total_episodes += 1
 
-            # Save a replay video of the episode
-            suffix = "success" if done else "failure"
-            task_segment = task_description.replace(" ", "_")
-
-            imageio.mimwrite(
-                pathlib.Path(args.video_out_path)
-                / f"rollout_{ID2CATEGORY[task_id+1][1]}_episode{episode_idx}_{suffix}.mp4",
-                [np.asarray(x) for x in replay_images],
-                fps=25,
-            )
-
             full_actions = np.stack(full_actions)
-            # np.save(pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_episode{episode_idx}_{suffix}.npy", full_actions)
-
-            # print(pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_episode{episode_idx}_{suffix}.mp4")
+            suffix = "success" if done else "failure"
+            video_path = (
+                pathlib.Path(args.video_out_path)
+                / f"rollout_{ID2CATEGORY[task_id+1][1]}_episode{episode_idx}_{suffix}.mp4"
+            )
+            video_queue.put((video_path, replay_images))
             # Log current results
             logging.info(f"Success: {done}")
             logging.info(f"# episodes completed so far: {total_episodes}")
@@ -253,6 +308,9 @@ def eval_libero(args: Args) -> None:
         json.dump(disturb_res, f)
     logging.info(f"Total success rate: {float(total_successes) / float(total_episodes)}")
     logging.info(f"Total episodes: {total_episodes}")
+    video_thread._replay_shutdown = True
+    video_queue.put(None)
+    video_thread.join()
 
 
 def _get_libero_env(task, resolution, seed):
