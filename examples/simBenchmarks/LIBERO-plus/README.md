@@ -51,7 +51,7 @@ pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 pip install robosuite==1.4.0 gym==0.25.2 bddl==1.0.1 easydict==1.9 opencv-python==4.6.0.66 cloudpickle==2.1.0 termcolor future==0.18.2
 ```
 
-进程内加载 checkpoint（`parallel_eval/eval_libero_model.py`，包括 8 卡脚本）还会用到 StarVLA 的模型栈。`torchvision` 必须和上面的 CUDA 版 `torch` 配套，装完后再把 `numpy` / `mujoco` 钉回仿真环境的版本：
+8 卡脚本 `parallel_eval/run_libero_plus_8gpu.sh` 每张卡起一个模型服务，仿真进程通过任务队列领 episode，不再在每个仿真进程里加载 checkpoint。模型服务进程仍会用到 StarVLA 的模型栈。`torchvision` 必须和上面的 CUDA 版 `torch` 配套，装完后再把 `numpy` / `mujoco` 钉回仿真环境的版本：
 
 ```bash
 pip install draccus==0.8.0 omegaconf transformers==4.57.0 accelerate==1.5.2 einops safetensors huggingface_hub diffusers qwen-vl-utils rich timm
