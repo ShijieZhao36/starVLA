@@ -134,4 +134,7 @@ DATASET_NAMED_MIXTURES = {
     "multi_robot": [
         ("LEROBOT_LIBERO_DATA/libero_10_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
     ],
+    "libero_plus": [
+        ("libero_plus_lerobot_starvla", 1.0, "libero_franka"),
+    ],
 }
