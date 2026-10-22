@@ -6,9 +6,15 @@ from typing import Dict, Optional, Sequence
 import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.spatial.transform import Rotation
 
+from gr00t.data.state_action.pose import EndEffectorPose
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.tools import read_mode_config
+
+# stage1 conversion_report.json: controller xyz * 0.05 m, axis-angle * 0.5 rad.
+_ROT6D_POSITION_SCALE_M = 0.05
+_ROT6D_ROTATION_SCALE_RAD = 0.5
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
@@ -141,6 +147,10 @@ class PolicyModel:
         response = self.vla.predict_action(example, **vla_input)
         normalized_actions = response["normalized_actions"]  # B, chunk, D
         normalized_actions = normalized_actions[0]
+        if normalized_actions.shape[1] == 10:
+            return self.unnormalize_rot6d_actions(
+                normalized_actions=normalized_actions, action_norm_stats=self.action_norm_stats
+            )
         if normalized_actions.shape[1] > 7:
             normalized_actions = normalized_actions[:, -7:]
         return self.unnormalize_actions(
@@ -192,6 +202,44 @@ class PolicyModel:
         )
 
         return actions
+
+    @staticmethod
+    def unnormalize_rot6d_actions(
+        normalized_actions: np.ndarray, action_norm_stats: Dict[str, np.ndarray]
+    ) -> np.ndarray:
+        """q01/q99 10-d xyz+rot6d+gripper -> LIBERO OSC command (chunk, 7).
+
+        Gripper stays in the unnormalized [0, 1] range. ``libero_rollout`` binarizes it.
+        """
+        if "q01" not in action_norm_stats or "q99" not in action_norm_stats:
+            raise KeyError("10-d rot6d decode requires q01/q99 in dataset_statistics.json")
+        q01 = np.asarray(action_norm_stats["q01"], dtype=np.float64)
+        q99 = np.asarray(action_norm_stats["q99"], dtype=np.float64)
+        if q01.shape[-1] != 10 or q99.shape[-1] != 10:
+            raise ValueError(f"Expected 10-d q01/q99, got {q01.shape} and {q99.shape}")
+        span = np.maximum(q99 - q01, 1e-8)
+        normalized = np.clip(np.asarray(normalized_actions, dtype=np.float64), -1.0, 1.0)
+        actions = 0.5 * (normalized + 1.0) * span + q01
+        xyz_m = actions[:, 0:3]
+        rotvec = PolicyModel._rot6d_to_rotvec(actions[:, 3:9])
+        gripper = actions[:, 9:10]
+        return np.concatenate(
+            [
+                xyz_m / _ROT6D_POSITION_SCALE_M,
+                rotvec / _ROT6D_ROTATION_SCALE_RAD,
+                gripper,
+            ],
+            axis=-1,
+        ).astype(np.float32)
+
+    @staticmethod
+    def _rot6d_to_rotvec(rot6d: np.ndarray) -> np.ndarray:
+        flat = np.asarray(rot6d, dtype=np.float64).reshape(-1, 6)
+        rotvecs = np.empty((flat.shape[0], 3), dtype=np.float64)
+        for i, row in enumerate(flat):
+            matrix = EndEffectorPose._rot6d_to_matrix(row)
+            rotvecs[i] = Rotation.from_matrix(matrix).as_rotvec()
+        return rotvecs
 
     @staticmethod
     def get_action_stats(unnorm_key: str, policy_ckpt_path) -> dict:
