@@ -16,7 +16,7 @@ config_yaml=./examples/simBenchmarks/LIBERO/train_files/starvla_cotrain_libero.y
 libero_plus_data_root=/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1
 data_mix=libero_plus_stage1
 run_root_dir=/mnt/zhaoshijie/checkpoints/starVLA
-run_id=libero_plus_qwen3vl_pi_gr00t_60k
+run_id=libero_plus_qwen3vl_pi_gr00t_120k
 # Optional: continue from the released LIBERO-4in1 Qwen3-VL-PI weights.
 # Leave empty to train the current QwenPI head from the base VLM.
 # The released checkpoint was trained with the historical 16-layer DiT; the
@@ -57,7 +57,7 @@ accelerate launch \
   --datasets.vla_data.data_mix ${data_mix} \
   --datasets.vla_data.per_device_batch_size 8 \
   --trainer.freeze_modules ${freeze_module_list} \
-  --trainer.max_train_steps 60000 \
+  --trainer.max_train_steps 120000 \
   --trainer.save_interval 10000 \
   --trainer.logging_frequency 100 \
   --trainer.eval_interval 100 \

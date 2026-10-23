@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--use-bf16", action="store_true")
     parser.add_argument("--use-canonical-forward", choices=("true", "false"), default="false")
+    parser.add_argument("--gripper-open-sign", choices=("positive", "negative"), default="positive")
     parser.add_argument("--idle-timeout", type=int, default=-1)
     args = parser.parse_args()
 
@@ -44,6 +45,7 @@ def main() -> None:
         policy_ckpt_path=args.pretrained_path,
         use_bf16=args.use_bf16,
         use_canonical_forward=use_canonical,
+        gripper_open_sign=args.gripper_open_sign,
     )
     policy = ChunkPolicy(model)
     metadata = {"action_chunk_size": int(model.action_chunk_size)}

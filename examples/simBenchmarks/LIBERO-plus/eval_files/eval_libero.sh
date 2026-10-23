@@ -8,7 +8,7 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 host="${host:-127.0.0.1}"
 your_ckpt="${your_ckpt:-/mnt/zhaoshijie/models/StarVLA/Qwen3-VL-PI-LIBERO-4in1/checkpoints/steps_100000_pytorch_model.pt}"
-output_dir="${output_dir:-${STARVLA_DIR}/results/libero_plus_eval}"
+output_dir="${output_dir:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_eval}"
 gpu_id="${gpu_id:-0}"
 export MUJOCO_EGL_DEVICE_ID="${MUJOCO_EGL_DEVICE_ID:-${gpu_id}}"
 

@@ -9,7 +9,7 @@ LIBERO_PYTHON="${LIBERO_PYTHON:-python}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 your_ckpt="${your_ckpt:-/mnt/zhaoshijie/models/StarVLA/Qwen3-VL-PI-LIBERO-4in1/checkpoints/steps_100000_pytorch_model.pt}"
-output_dir="${output_dir:-${STARVLA_DIR}/results/libero_plus_queue}"
+output_dir="${output_dir:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_queue}"
 # This released checkpoint was trained with historical LayerwiseFM. Set true only
 # for a checkpoint trained with the canonical interleaved DiT.
 USE_CANONICAL_FORWARD="${USE_CANONICAL_FORWARD:-false}"

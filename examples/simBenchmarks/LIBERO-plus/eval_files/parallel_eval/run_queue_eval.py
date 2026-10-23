@@ -25,6 +25,7 @@ def _parse_args():
     parser.add_argument("--pretrained-path", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--use-canonical-forward", choices=("true", "false"), default="false")
+    parser.add_argument("--gripper-open-sign", choices=("positive", "negative"), default="positive")
     parser.add_argument("--use-bf16", action="store_true", default=True)
     parser.add_argument("--no-bf16", action="store_false", dest="use_bf16")
     parser.add_argument("--sims-per-gpu", type=int, default=4)
@@ -135,6 +136,8 @@ def main() -> None:
                 str(port),
                 "--use-canonical-forward",
                 args.use_canonical_forward,
+                "--gripper-open-sign",
+                args.gripper_open_sign,
                 "--idle-timeout",
                 "-1",
             ]

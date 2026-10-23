@@ -74,11 +74,17 @@ class PolicyModel:
         port=10095,
         use_bf16=True,
         use_canonical_forward: bool = False,
+        gripper_open_sign: str = "positive",
     ) -> None:
 
+        if gripper_open_sign not in ("positive", "negative"):
+            raise ValueError(
+                f"gripper_open_sign must be 'positive' or 'negative', got {gripper_open_sign!r}"
+            )
         # build client to connect server policy
         self.policy_setup = policy_setup
         self.unnorm_key = unnorm_key
+        self.gripper_open_sign = gripper_open_sign
         canonical_override = (
             "framework.action_model.diffusion_model_cfg.use_canonical_forward="
             + str(bool(use_canonical_forward)).lower()
@@ -93,7 +99,7 @@ class PolicyModel:
             vla = vla.to(torch.bfloat16)
         self.vla = vla.to("cuda").eval()
 
-        print(f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key} ***")
+        print(f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key}, gripper_open_sign: {gripper_open_sign} ***")
         self.use_ddim = use_ddim
         self.num_ddim_steps = num_ddim_steps
         self.image_size = image_size
@@ -154,7 +160,9 @@ class PolicyModel:
         if normalized_actions.shape[1] > 7:
             normalized_actions = normalized_actions[:, -7:]
         return self.unnormalize_actions(
-            normalized_actions=normalized_actions, action_norm_stats=self.action_norm_stats
+            normalized_actions=normalized_actions,
+            action_norm_stats=self.action_norm_stats,
+            gripper_open_sign=self.gripper_open_sign,
         )
 
     def step(self, example: dict, step: int = 0, **kwargs) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
@@ -190,11 +198,26 @@ class PolicyModel:
         return {"raw_action": raw_action}
 
     @staticmethod
-    def unnormalize_actions(normalized_actions: np.ndarray, action_norm_stats: Dict[str, np.ndarray]) -> np.ndarray:
+    def unnormalize_actions(
+        normalized_actions: np.ndarray,
+        action_norm_stats: Dict[str, np.ndarray],
+        gripper_open_sign: str = "positive",
+    ) -> np.ndarray:
         mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["min"], dtype=bool))
         action_high, action_low = np.array(action_norm_stats["max"]), np.array(action_norm_stats["min"])
         normalized_actions = np.clip(normalized_actions, -1, 1)
-        normalized_actions[:, 6] = np.where(normalized_actions[:, 6] < 0.5, 0, 1)
+        gripper = normalized_actions[:, 6]
+        if gripper_open_sign == "negative":
+            # Raw LIBERO labels: -1 open, +1 close. Map onto the 0/1 open signal
+            # that the existing min/max unnorm and rollout binarize already expect.
+            open_signal = np.where(gripper < 0.0, 1.0, 0.0)
+        elif gripper_open_sign == "positive":
+            open_signal = np.where(gripper < 0.5, 0.0, 1.0)
+        else:
+            raise ValueError(
+                f"gripper_open_sign must be 'positive' or 'negative', got {gripper_open_sign!r}"
+            )
+        normalized_actions[:, 6] = open_signal
         actions = np.where(
             mask,
             0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,

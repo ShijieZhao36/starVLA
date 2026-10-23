@@ -7,7 +7,7 @@ LIBERO_PYTHON="${LIBERO_PYTHON:-python}"
 MUJOCO_GL="${MUJOCO_GL:-osmesa}"
 tasks_per_gpu="${tasks_per_gpu:-3}"
 your_ckpt="${your_ckpt:-/path/to/checkpoint.pt}"
-output_dir="${output_dir:-${STARVLA_DIR}/results/libero_plus_parallel_eval}"
+output_dir="${output_dir:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_parallel_eval}"
 
 if [[ -z "${LIBERO_HOME}" ]]; then
   echo "LIBERO_HOME is required."
