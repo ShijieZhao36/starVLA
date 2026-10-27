@@ -291,17 +291,29 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         actions: torch.Tensor,
         state: torch.Tensor = None,
         encoder_attention_mask=None,
+        action_mask: torch.Tensor = None,
     ):
         """
         vl_embs: list of torch.Tensor, each shape (B, seq_length, feature_dim)
         actions: shape (B, action_horizon, D_action)
         encoder_attention_mask: optional (B, seq_length) bool/int
+        action_mask: optional (B, action_horizon, D_action). Zero slots stay clean
+            and are left out of the loss.
         """
         device = actions.device
         num_layers = len(vl_embs_list)
         B, L, D = vl_embs_list[0].shape
         # Embed noised action trajectory.
         noise = torch.randn(actions.shape, device=actions.device, dtype=actions.dtype)
+        mask = None
+        if action_mask is not None:
+            mask = action_mask.to(device=actions.device, dtype=actions.dtype)
+            if mask.shape != actions.shape:
+                raise ValueError(
+                    f"action_mask shape {tuple(mask.shape)} != actions shape {tuple(actions.shape)}"
+                )
+            noise = noise * mask
+            actions = actions * mask
         t = self.sample_time(actions.shape[0], device=actions.device, dtype=actions.dtype)
         t = t[:, None, None]  # shape (B,1,1) for broadcast
 
@@ -343,7 +355,11 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         pred_actions = pred[:, -actions.shape[1] :]
 
         # Slice out only the action portion of pred and target.
-        loss = ((pred_actions - velocity) ** 2).mean()
+        squared_error = (pred_actions - velocity) ** 2
+        if mask is None:
+            loss = squared_error.mean()
+        else:
+            loss = (squared_error * mask).sum() / mask.sum().clamp_min(1)
         return loss
 
     @torch.no_grad()

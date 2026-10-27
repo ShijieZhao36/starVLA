@@ -20,6 +20,12 @@ from gr00t.data.interfaces import BaseProcessor
 from gr00t.data.state_action.state_action_processor import StateActionProcessor
 from gr00t.data.types import ActionRepresentation, EmbodimentTag, ModalityConfig, VLAStepData
 from gr00t.data.utils import parse_modality_configs
+from starVLA.dataloader.canonical_layout import (
+    CanonicalLayout,
+    RobotCanonicalMap,
+    gather,
+    scatter,
+)
 
 
 def _tag_value(tag: Any) -> str:
@@ -79,11 +85,15 @@ class StarVLAPackProcessor(BaseProcessor):
         use_percentiles: bool = True,
         clip_outliers: bool = True,
         use_relative_action: bool = False,
+        canonical_layout: CanonicalLayout | None = None,
+        robot_maps: dict[str, RobotCanonicalMap] | None = None,
     ):
         self.modality_configs = parse_modality_configs(modality_configs)
         self.include_state = include_state
         self.use_percentiles = use_percentiles
         self.use_relative_action = bool(use_relative_action)
+        self.canonical_layout = canonical_layout
+        self.robot_maps = robot_maps or {}
         self.state_action_processor = StateActionProcessor(
             modality_configs=self.modality_configs,
             statistics=statistics,
@@ -152,7 +162,12 @@ class StarVLAPackProcessor(BaseProcessor):
             raw_action, tag, state=raw_state if raw_state else None
         )
 
-        action = _concat_groups(norm_action, list(configs["action"].modality_keys))
+        action_mask = None
+        if self.canonical_layout is not None:
+            robot_map = self._robot_map(tag)
+            action, action_mask = scatter(norm_action, robot_map.action, self.canonical_layout.dim)
+        else:
+            action = _concat_groups(norm_action, list(configs["action"].modality_keys))
 
         images = []
         video_cfg = configs.get("video")
@@ -169,9 +184,24 @@ class StarVLAPackProcessor(BaseProcessor):
             "action": action,
             "robot_tag": tag,
         }
+        if action_mask is not None:
+            sample["action_mask"] = action_mask
         if self.include_state and "state" in configs and norm_state:
-            sample["state"] = _concat_groups(norm_state, list(configs["state"].modality_keys))
+            if self.canonical_layout is not None:
+                robot_map = self._robot_map(tag)
+                state, state_mask = scatter(norm_state, robot_map.state, self.canonical_layout.dim)
+                sample["state"] = state
+                sample["state_mask"] = state_mask
+            else:
+                sample["state"] = _concat_groups(norm_state, list(configs["state"].modality_keys))
         return sample
+
+    def _robot_map(self, tag: str) -> RobotCanonicalMap:
+        if tag not in self.robot_maps:
+            raise KeyError(
+                f"No canonical robot map for {tag!r}. Available: {sorted(self.robot_maps)}"
+            )
+        return self.robot_maps[tag]
 
     def decode_action(
         self,
@@ -180,10 +210,13 @@ class StarVLAPackProcessor(BaseProcessor):
         state: dict[str, np.ndarray] | None = None,
     ) -> dict[str, np.ndarray]:
         tag = _tag_value(embodiment_tag)
+        action = np.asarray(action)
+        if self.canonical_layout is not None:
+            grouped = gather(action, self._robot_map(tag).action)
+            return self.state_action_processor.unapply_action(grouped, tag, state=state)
         keys = list(self.modality_configs[tag]["action"].modality_keys)
         grouped = {}
         offset = 0
-        action = np.asarray(action)
         for key in keys:
             dim = int(self.state_action_processor.norm_params[tag]["action"][key]["dim"])
             grouped[key] = action[..., offset : offset + dim]

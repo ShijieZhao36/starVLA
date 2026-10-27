@@ -1,0 +1,19 @@
+# Canonical bimanual action/state layout.
+# Widths live here. The loader checks that the fields sum to dim.
+dim: 90
+arms:
+  - left
+  - right
+arm_fields:
+  - name: joint_pos
+    dim: 7
+  - name: eef_pose
+    dim: 9
+    format: xyz_rot6d
+  - name: gripper
+    dim: 1
+  - name: fingertips
+    dim: 15
+shared:
+  - name: reserved
+    dim: 26

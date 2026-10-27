@@ -1,0 +1,49 @@
+# Fill the canonical layout from Galaxea R1 Lite stage1 groups.
+# start is the offset inside the named field. Omitted groups stay zero and masked.
+robot_type: galaxea_r1lite_stage1
+action:
+  - field: left.joint_pos
+    source: left_arm_joints
+    start: 0
+    length: 6
+  - field: left.eef_pose
+    source: left_eef
+  - field: left.gripper
+    source: left_gripper
+  - field: right.joint_pos
+    source: right_arm_joints
+    start: 0
+    length: 6
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.gripper
+    source: right_gripper
+  - field: reserved
+    source: torso_twist
+    start: 0
+    length: 6
+  - field: reserved
+    source: chassis_velocity
+    start: 6
+    length: 3
+state:
+  - field: left.joint_pos
+    source: left_arm_joints
+    start: 0
+    length: 6
+  - field: left.eef_pose
+    source: left_eef
+  - field: left.gripper
+    source: left_gripper
+  - field: right.joint_pos
+    source: right_arm_joints
+    start: 0
+    length: 6
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.gripper
+    source: right_gripper
+  - field: reserved
+    source: torso
+    start: 0
+    length: 3
