@@ -37,6 +37,7 @@ from gr00t.data.state_action.action_chunking import EndEffectorActionChunk, Join
 from gr00t.data.state_action.pose import EndEffectorPose, JointPose
 from gr00t.data.types import (
     ActionConfig,
+    ActionFormat,
     ActionRepresentation,
     ActionType,
     ModalityConfig as Gr00tModalityConfig,
@@ -291,6 +292,90 @@ def _stack_frame_column(values: np.ndarray) -> np.ndarray:
     return np.stack([np.asarray(frame, dtype=np.float32) for frame in values], axis=0)
 
 
+def _rot6d_to_matrix(rot6d: np.ndarray) -> np.ndarray:
+    """Vectorized form of ``EndEffectorPose._rot6d_to_matrix``. ``(..., 6) -> (..., 3, 3)``."""
+    row1 = rot6d[..., 0:3]
+    row2 = rot6d[..., 3:6]
+    row1 = row1 / np.linalg.norm(row1, axis=-1, keepdims=True)
+    row2 = row2 - np.sum(row1 * row2, axis=-1, keepdims=True) * row1
+    row2 = row2 / np.linalg.norm(row2, axis=-1, keepdims=True)
+    row3 = np.cross(row1, row2)
+    return np.stack((row1, row2, row3), axis=-2)
+
+
+def _scipy_rotation_matrix(rot6d: np.ndarray) -> np.ndarray:
+    """Match ``EndEffectorPose`` by running gram-schmidt matrices through scipy."""
+    from scipy.spatial.transform import Rotation
+
+    raw = _rot6d_to_matrix(np.asarray(rot6d, dtype=np.float64))
+    cleaned = Rotation.from_matrix(raw.reshape(-1, 3, 3)).as_matrix()
+    return cleaned.reshape(raw.shape)
+
+
+def _relative_xyz_rot6d(windows: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    """Relative xyz+rot6d for many windows that share one reference per window.
+
+    ``windows`` is ``(N, H, 9)`` and ``reference`` is ``(N, 9)``. The result matches
+    ``EndEffectorActionChunk.relative_chunking`` followed by ``to(XYZ_ROT6D)``.
+    """
+    from scipy.spatial.transform import Rotation
+
+    windows = np.asarray(windows, dtype=np.float64)
+    reference = np.asarray(reference, dtype=np.float64)
+    ref_rotation = _scipy_rotation_matrix(reference[:, 3:])
+    action_rotation = _scipy_rotation_matrix(windows[..., 3:])
+    ref_translation = reference[:, :3]
+    action_translation = windows[..., :3]
+    ref_rotation_inv = np.swapaxes(ref_rotation, -1, -2)
+    translation_inv = -np.einsum("nij,nj->ni", ref_rotation_inv, ref_translation)
+    relative_rotation = np.einsum("nij,nhjk->nhik", ref_rotation_inv, action_rotation)
+    relative_translation = np.einsum("nij,nhj->nhi", ref_rotation_inv, action_translation)
+    relative_translation = relative_translation + translation_inv[:, None, :]
+    cleaned = Rotation.from_matrix(relative_rotation.reshape(-1, 3, 3)).as_matrix()
+    cleaned = cleaned.reshape(relative_rotation.shape)
+    rot6d = cleaned[..., :2, :].reshape(cleaned.shape[0], cleaned.shape[1], 6)
+    return np.concatenate((relative_translation, rot6d), axis=-1).astype(np.float32)
+
+
+def _relative_windows(
+    action_column: np.ndarray,
+    state_column: np.ndarray,
+    action_deltas: np.ndarray,
+    state_offset: int,
+    action_config: ActionConfig,
+) -> np.ndarray | None:
+    """Every legal window in one episode. Shape ``(usable, H, D)``."""
+    usable = len(action_column) - int(action_deltas[-1])
+    if usable <= 0:
+        return None
+    origins = np.arange(usable)
+    if action_config.type == ActionType.EEF and action_config.format == ActionFormat.XYZ_ROT6D:
+        windows = action_column[origins[:, None] + action_deltas[None, :]]
+        reference = state_column[origins + state_offset]
+        return _relative_xyz_rot6d(windows, reference)
+    blocks = [
+        _relative_chunk(
+            action_column[action_deltas + origin],
+            state_column[origin + state_offset],
+            action_config,
+        )
+        for origin in origins
+    ]
+    return np.stack(blocks, axis=0)
+
+
+def _summarize_relative_blocks(blocks: list[np.ndarray]) -> dict[str, np.ndarray]:
+    stacked = np.concatenate(blocks, axis=0)
+    return {
+        "max": np.max(stacked, axis=0),
+        "min": np.min(stacked, axis=0),
+        "q01": np.quantile(stacked, 0.01, axis=0),
+        "q99": np.quantile(stacked, 0.99, axis=0),
+        "mean": np.mean(stacked, axis=0),
+        "std": np.std(stacked, axis=0),
+    }
+
+
 def _relative_chunk(actions: np.ndarray, reference_state: np.ndarray, action_config: ActionConfig) -> np.ndarray:
     """Match GR00T ``RelativeActionLoader``: every step uses one reference state."""
     if action_config.type == ActionType.EEF:
@@ -306,13 +391,7 @@ def _relative_chunk(actions: np.ndarray, reference_state: np.ndarray, action_con
     raise ValueError(f"Unknown ActionType: {action_config.type}")
 
 
-def _calculate_relative_stats_for_key(
-    dataset_path: Path,
-    modality_configs: dict[str, Gr00tModalityConfig],
-    action_key: str,
-    action_config: ActionConfig,
-) -> dict[str, np.ndarray]:
-    state_key = action_config.state_key or action_key
+def _check_relative_alignment(modality_configs: dict[str, Gr00tModalityConfig], action_key: str) -> None:
     action_modality = modality_configs["action"]
     state_modality = modality_configs["state"]
     if state_modality.delta_indices[-1] != action_modality.delta_indices[0]:
@@ -321,41 +400,74 @@ def _calculate_relative_stats_for_key(
             f"{state_modality.delta_indices[-1]} to equal the first action index "
             f"{action_modality.delta_indices[0]}"
         )
-    loader_configs = {
-        "action": Gr00tModalityConfig(
-            delta_indices=list(action_modality.delta_indices),
-            modality_keys=[action_key],
-            action_configs=[action_config],
-        ),
-        "state": Gr00tModalityConfig(
-            delta_indices=list(state_modality.delta_indices),
-            modality_keys=[state_key],
-        ),
-    }
-    loader = LeRobotEpisodeLoader(dataset_path, loader_configs)
+
+
+def _calculate_relative_stats_for_keys(
+    dataset_path: Path,
+    modality_configs: dict[str, Gr00tModalityConfig],
+    pairs: list[tuple[str, ActionConfig]],
+) -> dict[str, dict[str, np.ndarray]]:
+    """One episode scan for every pending relative key."""
+    action_modality = modality_configs["action"]
+    state_modality = modality_configs["state"]
+    for action_key, _action_config in pairs:
+        _check_relative_alignment(modality_configs, action_key)
+    action_keys = [action_key for action_key, _action_config in pairs]
+    action_configs = [action_config for _action_key, action_config in pairs]
+    state_keys: list[str] = []
+    for action_key, action_config in pairs:
+        state_key = action_config.state_key or action_key
+        if state_key not in state_keys:
+            state_keys.append(state_key)
+    loader = LeRobotEpisodeLoader(
+        dataset_path,
+        {
+            "action": Gr00tModalityConfig(
+                delta_indices=list(action_modality.delta_indices),
+                modality_keys=action_keys,
+                action_configs=action_configs,
+            ),
+            "state": Gr00tModalityConfig(
+                delta_indices=list(state_modality.delta_indices),
+                modality_keys=state_keys,
+            ),
+        },
+    )
     action_deltas = np.asarray(action_modality.delta_indices)
     state_offset = int(state_modality.delta_indices[-1])
-    trajectories = []
+    blocks: dict[str, list[np.ndarray]] = {action_key: [] for action_key in action_keys}
     for episode_id in range(len(loader)):
         frame = loader[episode_id]
-        state_column = _stack_frame_column(frame[f"state.{state_key}"].to_numpy())
-        action_column = _stack_frame_column(frame[f"action.{action_key}"].to_numpy())
-        usable = len(frame) - int(action_deltas[-1])
-        for origin in range(usable):
-            reference = state_column[origin + state_offset]
-            window = action_column[action_deltas + origin]
-            trajectories.append(_relative_chunk(window, reference, action_config))
-    if not trajectories:
-        raise ValueError(f"No relative-action windows for {action_key!r} in {dataset_path}")
-    stacked = np.stack(trajectories, axis=0)
-    return {
-        "max": np.max(stacked, axis=0),
-        "min": np.min(stacked, axis=0),
-        "q01": np.quantile(stacked, 0.01, axis=0),
-        "q99": np.quantile(stacked, 0.99, axis=0),
-        "mean": np.mean(stacked, axis=0),
-        "std": np.std(stacked, axis=0),
-    }
+        for action_key, action_config in pairs:
+            state_key = action_config.state_key or action_key
+            block = _relative_windows(
+                _stack_frame_column(frame[f"action.{action_key}"].to_numpy()),
+                _stack_frame_column(frame[f"state.{state_key}"].to_numpy()),
+                action_deltas,
+                state_offset,
+                action_config,
+            )
+            if block is not None:
+                blocks[action_key].append(block)
+    summarized = {}
+    for action_key in action_keys:
+        if not blocks[action_key]:
+            raise ValueError(f"No relative-action windows for {action_key!r} in {dataset_path}")
+        summarized[action_key] = _summarize_relative_blocks(blocks[action_key])
+    return summarized
+
+
+def _calculate_relative_stats_for_key(
+    dataset_path: Path,
+    modality_configs: dict[str, Gr00tModalityConfig],
+    action_key: str,
+    action_config: ActionConfig,
+) -> dict[str, np.ndarray]:
+    return _calculate_relative_stats_for_keys(
+        dataset_path,
+        modality_configs,
+        [(action_key, action_config)],
+    )[action_key]
 
 
 def write_relative_action_stats(dataset_path: Path | str, modality_configs: dict[str, Gr00tModalityConfig]) -> None:
@@ -392,11 +504,18 @@ def write_relative_action_stats(dataset_path: Path | str, modality_configs: dict
     if not pending:
         logger.info("Relative stats already match %s", stats_path)
         return
-    for action_key, action_config, expected in pending:
-        logger.info("Generating relative stats for %s key %s", dataset_path, action_key)
-        stats[action_key] = _calculate_relative_stats_for_key(
-            dataset_path, modality_configs, action_key, action_config
-        )
+    logger.info(
+        "Generating relative stats for %s keys %s",
+        dataset_path,
+        [action_key for action_key, _action_config, _expected in pending],
+    )
+    summarized = _calculate_relative_stats_for_keys(
+        dataset_path,
+        modality_configs,
+        [(action_key, action_config) for action_key, action_config, _expected in pending],
+    )
+    for action_key, _action_config, expected in pending:
+        stats[action_key] = summarized[action_key]
         fingerprints[action_key] = expected
     _dump_stats_cache_atomic(stats_path, to_json_serializable(dict(stats)))
 
