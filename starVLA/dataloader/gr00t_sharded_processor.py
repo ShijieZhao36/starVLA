@@ -3,9 +3,10 @@
 
 """Pack GR00T ``VLAStepData`` into the starVLA sample dict.
 
-Applies absolute q01/q99 (or min-max) normalization via GR00T
-``StateActionProcessor`` (no relative EEF conversion) and leaves Qwen
-tokenization to ``forward()``.
+Applies q01/q99 (or min-max) normalization via GR00T ``StateActionProcessor``.
+Relative EEF or joint conversion runs only when ``use_relative_action`` is
+true and the key's ``ActionConfig.rep`` is ``RELATIVE``. Qwen tokenization
+stays in ``forward()``.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from PIL import Image
 
 from gr00t.data.interfaces import BaseProcessor
 from gr00t.data.state_action.state_action_processor import StateActionProcessor
-from gr00t.data.types import EmbodimentTag, ModalityConfig, VLAStepData
+from gr00t.data.types import ActionRepresentation, EmbodimentTag, ModalityConfig, VLAStepData
 from gr00t.data.utils import parse_modality_configs
 
 
@@ -77,17 +78,19 @@ class StarVLAPackProcessor(BaseProcessor):
         include_state: bool = False,
         use_percentiles: bool = True,
         clip_outliers: bool = True,
+        use_relative_action: bool = False,
     ):
         self.modality_configs = parse_modality_configs(modality_configs)
         self.include_state = include_state
         self.use_percentiles = use_percentiles
+        self.use_relative_action = bool(use_relative_action)
         self.state_action_processor = StateActionProcessor(
             modality_configs=self.modality_configs,
             statistics=statistics,
             use_percentiles=use_percentiles,
             clip_outliers=clip_outliers,
             apply_sincos_state_encoding=False,
-            use_relative_action=False,
+            use_relative_action=self.use_relative_action,
         )
         self.training = True
 
@@ -97,6 +100,33 @@ class StarVLAPackProcessor(BaseProcessor):
 
     def set_statistics(self, statistics: dict[str, Any], override: bool = False) -> None:
         self.state_action_processor.set_statistics(statistics, override=override)
+        # GR00T replaces a relative key's norm params with the raw relative-stats
+        # dict, whose "min"/"max" are the full range. Training asked for q01/q99
+        # via use_percentiles, so put those back into the bounds that normalize().
+        if not (self.use_percentiles and self.use_relative_action):
+            return
+        norm_params = self.state_action_processor.norm_params
+        for tag, configs in self.modality_configs.items():
+            action = configs.get("action")
+            if action is None or tag not in norm_params or "action" not in norm_params[tag]:
+                continue
+            for key in action.modality_keys:
+                params = norm_params[tag]["action"].get(key)
+                if params is None or "min" not in params:
+                    continue
+                # Bounds may be (D,) or (T, D). The split width is D, not T.
+                params["dim"] = np.array(np.asarray(params["min"]).shape[-1])
+            if not action.action_configs:
+                continue
+            for key, action_config in zip(action.modality_keys, action.action_configs):
+                if action_config.rep != ActionRepresentation.RELATIVE:
+                    continue
+                params = norm_params[tag]["action"][key]
+                if "q01" not in params or "q99" not in params:
+                    continue
+                params["min"] = np.asarray(params["q01"], dtype=np.float64)
+                params["max"] = np.asarray(params["q99"], dtype=np.float64)
+                params["dim"] = np.array(np.asarray(params["min"]).shape[-1])
 
     def __call__(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         step = None

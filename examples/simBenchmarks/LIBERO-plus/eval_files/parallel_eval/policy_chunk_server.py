@@ -21,11 +21,18 @@ class ChunkPolicy:
         self._model = model
         self._lock = threading.Lock()
 
-    def predict_action(self, example, **kwargs):
+    def predict_action(self, example=None, examples=None, **kwargs):
         del kwargs
+        if example is None:
+            if not examples:
+                raise ValueError("predict_action requires example or examples")
+            example = examples[0]
         with self._lock:
             actions = self._model.infer_action_chunk(example)
-        return {"actions": np.asarray(actions)}
+        actions = np.asarray(actions)
+        if actions.ndim == 2:
+            actions = actions[None, ...]
+        return {"actions": actions}
 
 
 def main() -> None:

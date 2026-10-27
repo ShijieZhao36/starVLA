@@ -11,6 +11,7 @@ is ignored on this path.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import logging
@@ -22,11 +23,25 @@ import numpy as np
 from torch.utils.data import IterableDataset
 
 from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
+from gr00t.data.dataset.lerobot_episode_loader import LeRobotEpisodeLoader
 from gr00t.data.dataset.sharded_mixture_dataset import ShardedMixtureDataset
 from gr00t.data.dataset.sharded_single_step_dataset import ShardedSingleStepDataset
 from gr00t.data.embodiment_tags import EmbodimentTag
-from gr00t.data.stats import generate_stats
-from gr00t.data.types import ModalityConfig as Gr00tModalityConfig
+from gr00t.data.stats import (
+    STATS_FINGERPRINTS_KEY,
+    _dump_stats_cache_atomic,
+    _load_stats_cache,
+    generate_stats,
+)
+from gr00t.data.state_action.action_chunking import EndEffectorActionChunk, JointActionChunk
+from gr00t.data.state_action.pose import EndEffectorPose, JointPose
+from gr00t.data.types import (
+    ActionConfig,
+    ActionRepresentation,
+    ActionType,
+    ModalityConfig as Gr00tModalityConfig,
+)
+from gr00t.data.utils import to_json_serializable
 from gr00t.utils.dist_utils import run_or_wait_on_rank0
 from starVLA.dataloader.gr00t_lerobot.registry import (
     DATASET_NAMED_MIXTURES,
@@ -90,6 +105,7 @@ class Gr00tShardedMixture(IterableDataset):
             self.get_dataset_statistics(),
             self.processor.modality_configs,
             use_percentiles=bool(getattr(self.processor, "use_percentiles", True)),
+            use_relative_action=bool(getattr(self.processor, "use_relative_action", False)),
         )
         with open(save_path, "w") as f:
             json.dump(_jsonify(payload), f, indent=2)
@@ -108,26 +124,69 @@ def _jsonify(obj: Any) -> Any:
     return obj
 
 
-def _as_list(value: Any) -> list:
-    if hasattr(value, "tolist"):
-        value = value.tolist()
-    if isinstance(value, (list, tuple)):
-        out = []
-        for item in value:
-            if isinstance(item, (list, tuple)):
-                out.extend(_as_list(item))
-            else:
-                out.append(float(item) if isinstance(item, (np.floating, np.integer, float, int)) else item)
-        return out
-    return [value]
+def _stat_array(value: Any) -> np.ndarray:
+    return np.asarray(value, dtype=np.float64)
+
+
+def _concat_stat_arrays(chunks: list[np.ndarray]) -> np.ndarray:
+    """Concatenate per-key bounds on the last axis.
+
+    Absolute bounds are ``(D,)``. Relative bounds from chunked poses are
+    ``(T, D)``. A 1D group is repeated across time so it can sit next to a
+    2D group. All-1D groups stay 1D, which is what existing absolute runs save.
+    """
+    if not chunks:
+        return np.asarray([], dtype=np.float64)
+    if all(chunk.ndim == 1 for chunk in chunks):
+        return np.concatenate(chunks, axis=0)
+    time = next(chunk.shape[0] for chunk in chunks if chunk.ndim == 2)
+    aligned = []
+    for chunk in chunks:
+        if chunk.ndim == 1:
+            aligned.append(np.broadcast_to(chunk, (time, chunk.shape[0])).copy())
+        elif chunk.ndim == 2:
+            if chunk.shape[0] != time:
+                raise ValueError(
+                    f"Cannot concat stat shapes {[c.shape for c in chunks]}: time dimension differs"
+                )
+            aligned.append(chunk)
+        else:
+            raise ValueError(f"Expected stat rank 1 or 2, got shape {chunk.shape}")
+    return np.concatenate(aligned, axis=-1)
+
+
+def _action_group_stats(tag_stats: dict, key: str, action_config: ActionConfig | None, use_relative_action: bool):
+    if (
+        use_relative_action
+        and action_config is not None
+        and action_config.rep == ActionRepresentation.RELATIVE
+    ):
+        relative = tag_stats.get("relative_action") or {}
+        if key not in relative:
+            raise KeyError(
+                f"use_relative_action is true but relative stats have no key {key!r}. "
+                "Expected meta/relative_stats.json to be loaded for this dataset."
+            )
+        return relative[key]
+    action_stats = tag_stats.get("action") or {}
+    if key not in action_stats:
+        return None
+    return action_stats[key]
 
 
 def freeze_concat_statistics(
     global_stats: dict,
     modality_configs: dict[str, dict[str, Gr00tModalityConfig]],
     use_percentiles: bool = True,
+    use_relative_action: bool = False,
 ) -> dict:
-    """Flatten per-group GR00T stats into concat vectors keyed by embodiment tag."""
+    """Flatten per-group GR00T stats into concat vectors keyed by embodiment tag.
+
+    Relative action keys use ``relative_action`` bounds when ``use_relative_action``
+    is set. Those bounds stay shaped ``(T, D)`` instead of being flattened to
+    ``T * D``, so inference can unnormalize each chunk step with its own range.
+    """
+    stat_names = ("min", "max", "mean", "std", "q01", "q99")
     frozen = {}
     for tag, tag_stats in (global_stats or {}).items():
         if tag == "__fingerprints__" or not isinstance(tag_stats, dict):
@@ -135,21 +194,30 @@ def freeze_concat_statistics(
         tag_out = {}
         configs = modality_configs.get(tag, {})
         for modality, out_name in (("action", "action"), ("state", "proprio")):
-            if modality not in tag_stats:
+            if modality not in tag_stats and not (modality == "action" and use_relative_action):
                 continue
-            keys = list(configs[modality].modality_keys) if modality in configs else list(tag_stats[modality])
-            combined = {name: [] for name in ("min", "max", "mean", "std", "q01", "q99")}
-            for key in keys:
-                if key not in tag_stats[modality]:
+            keys = list(configs[modality].modality_keys) if modality in configs else list(tag_stats.get(modality, {}))
+            action_configs = list(configs["action"].action_configs or []) if modality == "action" and "action" in configs else []
+            pieces = {name: [] for name in stat_names}
+            for index, key in enumerate(keys):
+                action_config = action_configs[index] if index < len(action_configs) else None
+                if modality == "action":
+                    group = _action_group_stats(tag_stats, key, action_config, use_relative_action)
+                else:
+                    group = (tag_stats.get(modality) or {}).get(key)
+                if group is None:
                     continue
-                group = tag_stats[modality][key]
-                for name in combined:
+                for name in stat_names:
                     if name in group:
-                        combined[name].extend(_as_list(group[name]))
-            if combined["min"]:
-                combined["mask"] = [True] * len(combined["min"])
-                combined["use_percentiles"] = bool(use_percentiles)
-                tag_out[out_name] = combined
+                        pieces[name].append(_stat_array(group[name]))
+            if not pieces["min"]:
+                continue
+            combined = {name: _concat_stat_arrays(parts) for name, parts in pieces.items() if parts}
+            if "min" not in combined:
+                continue
+            combined["mask"] = np.ones(combined["min"].shape[-1], dtype=bool)
+            combined["use_percentiles"] = bool(use_percentiles)
+            tag_out[out_name] = combined
         if tag_out:
             frozen[tag] = tag_out
     return frozen
@@ -162,6 +230,24 @@ def _strip_modality_prefix(key: str, modality: str) -> str:
     return key
 
 
+def _data_config_action_configs(data_config, action_keys: list[str]) -> list[ActionConfig] | None:
+    """Return per-key GR00T action configs stored beside ``modality_config()``.
+
+    starVLA's ``ModalityConfig`` has no ``action_configs`` field, so robot
+    registries keep the list on the DataConfig itself, aligned with action keys.
+    """
+    raw = getattr(data_config, "action_configs", None)
+    if raw is None:
+        return None
+    configs = list(raw)
+    if len(configs) != len(action_keys):
+        raise ValueError(
+            f"DataConfig.action_configs has length {len(configs)} but action keys "
+            f"are {action_keys}"
+        )
+    return configs
+
+
 def data_config_to_gr00t_modality_configs(data_config) -> dict[str, Gr00tModalityConfig]:
     """Convert starVLA ``DataConfig.modality_config()`` into GR00T key layout."""
     src = data_config.modality_config()
@@ -172,12 +258,146 @@ def data_config_to_gr00t_modality_configs(data_config) -> dict[str, Gr00tModalit
             keys = [_strip_modality_prefix(k, modality) for k in keys]
         if not keys:
             continue
+        action_configs = None
+        if modality == "action":
+            action_configs = _data_config_action_configs(data_config, keys)
         out[modality] = Gr00tModalityConfig(
             delta_indices=list(cfg.delta_indices),
             modality_keys=keys,
-            action_configs=None,
+            action_configs=action_configs,
         )
     return out
+
+
+def _relative_fingerprint(action_modality: Gr00tModalityConfig, state_modality: Gr00tModalityConfig, action_key: str, action_config: ActionConfig) -> str:
+    payload = {
+        "action_key": action_key,
+        "action_delta_indices": list(action_modality.delta_indices),
+        "state_delta_indices": list(state_modality.delta_indices),
+        "rep": action_config.rep.name,
+        "type": action_config.type.name,
+        "format": action_config.format.name,
+        "state_key": action_config.state_key,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _stack_frame_column(values: np.ndarray) -> np.ndarray:
+    """Turn a dataframe column of per-frame vectors into ``(N, D)``."""
+    if isinstance(values, np.ndarray) and values.dtype != object and values.ndim == 2:
+        return np.asarray(values, dtype=np.float32)
+    return np.stack([np.asarray(frame, dtype=np.float32) for frame in values], axis=0)
+
+
+def _relative_chunk(actions: np.ndarray, reference_state: np.ndarray, action_config: ActionConfig) -> np.ndarray:
+    """Match GR00T ``RelativeActionLoader``: every step uses one reference state."""
+    if action_config.type == ActionType.EEF:
+        reference = EndEffectorPose.from_action_format(reference_state, action_config.format)
+        chunk = EndEffectorActionChunk.from_array(actions, action_config.format).relative_chunking(
+            reference_frame=reference
+        )
+        return chunk.to(action_config.format).astype(np.float32)
+    if action_config.type == ActionType.NON_EEF:
+        reference = JointPose(reference_state)
+        chunk = JointActionChunk([JointPose(row) for row in actions]).relative_chunking(reference_frame=reference)
+        return np.stack([pose.joints for pose in chunk.poses], dtype=np.float32)
+    raise ValueError(f"Unknown ActionType: {action_config.type}")
+
+
+def _calculate_relative_stats_for_key(
+    dataset_path: Path,
+    modality_configs: dict[str, Gr00tModalityConfig],
+    action_key: str,
+    action_config: ActionConfig,
+) -> dict[str, np.ndarray]:
+    state_key = action_config.state_key or action_key
+    action_modality = modality_configs["action"]
+    state_modality = modality_configs["state"]
+    if state_modality.delta_indices[-1] != action_modality.delta_indices[0]:
+        raise ValueError(
+            f"Relative stats for {action_key!r} need the last state index "
+            f"{state_modality.delta_indices[-1]} to equal the first action index "
+            f"{action_modality.delta_indices[0]}"
+        )
+    loader_configs = {
+        "action": Gr00tModalityConfig(
+            delta_indices=list(action_modality.delta_indices),
+            modality_keys=[action_key],
+            action_configs=[action_config],
+        ),
+        "state": Gr00tModalityConfig(
+            delta_indices=list(state_modality.delta_indices),
+            modality_keys=[state_key],
+        ),
+    }
+    loader = LeRobotEpisodeLoader(dataset_path, loader_configs)
+    action_deltas = np.asarray(action_modality.delta_indices)
+    state_offset = int(state_modality.delta_indices[-1])
+    trajectories = []
+    for episode_id in range(len(loader)):
+        frame = loader[episode_id]
+        state_column = _stack_frame_column(frame[f"state.{state_key}"].to_numpy())
+        action_column = _stack_frame_column(frame[f"action.{action_key}"].to_numpy())
+        usable = len(frame) - int(action_deltas[-1])
+        for origin in range(usable):
+            reference = state_column[origin + state_offset]
+            window = action_column[action_deltas + origin]
+            trajectories.append(_relative_chunk(window, reference, action_config))
+    if not trajectories:
+        raise ValueError(f"No relative-action windows for {action_key!r} in {dataset_path}")
+    stacked = np.stack(trajectories, axis=0)
+    return {
+        "max": np.max(stacked, axis=0),
+        "min": np.min(stacked, axis=0),
+        "q01": np.quantile(stacked, 0.01, axis=0),
+        "q99": np.quantile(stacked, 0.99, axis=0),
+        "mean": np.mean(stacked, axis=0),
+        "std": np.std(stacked, axis=0),
+    }
+
+
+def write_relative_action_stats(dataset_path: Path | str, modality_configs: dict[str, Gr00tModalityConfig]) -> None:
+    """Write ``meta/relative_stats.json`` for RELATIVE keys using the resolved config.
+
+    This does not call GR00T ``generate_rel_stats``, which looks the config up in
+    ``MODALITY_CONFIGS`` by ``EmbodimentTag``. Custom robots such as LIBERO-plus
+    are not registered there. ``LeRobotEpisodeLoader`` reads the file on init.
+    """
+    dataset_path = Path(dataset_path)
+    action_modality = modality_configs.get("action")
+    state_modality = modality_configs.get("state")
+    if action_modality is None or state_modality is None or not action_modality.action_configs:
+        return
+    relative_pairs = [
+        (key, action_config)
+        for key, action_config in zip(action_modality.modality_keys, action_modality.action_configs)
+        if action_config.rep == ActionRepresentation.RELATIVE
+    ]
+    if not relative_pairs:
+        return
+    stats_path = dataset_path / "meta" / "relative_stats.json"
+    stats = _load_stats_cache(stats_path)
+    fingerprints = stats.setdefault(STATS_FINGERPRINTS_KEY, {})
+    if not isinstance(fingerprints, dict):
+        fingerprints = {}
+        stats[STATS_FINGERPRINTS_KEY] = fingerprints
+    pending = []
+    for action_key, action_config in relative_pairs:
+        expected = _relative_fingerprint(action_modality, state_modality, action_key, action_config)
+        if action_key in stats and fingerprints.get(action_key) == expected:
+            continue
+        pending.append((action_key, action_config, expected))
+    if not pending:
+        logger.info("Relative stats already match %s", stats_path)
+        return
+    for action_key, action_config, expected in pending:
+        logger.info("Generating relative stats for %s key %s", dataset_path, action_key)
+        stats[action_key] = _calculate_relative_stats_for_key(
+            dataset_path, modality_configs, action_key, action_config
+        )
+        fingerprints[action_key] = expected
+    _dump_stats_cache_atomic(stats_path, to_json_serializable(dict(stats)))
 
 
 def stats_tag_for(data_config, robot_type: str) -> str:
@@ -279,9 +499,11 @@ def get_vla_dataset(
     num_shards_per_epoch = int(_cfg_get(data_cfg, "num_shards_per_epoch", int(1e5)))
     include_state = _include_state(data_cfg)
     use_percentiles = _as_bool(_cfg_get(data_cfg, "use_percentiles", True), default=True)
+    use_relative_action = _as_bool(_cfg_get(data_cfg, "use_relative_action", False), default=False)
     logger.info(
-        "[gr00t_sharded] action/state bounds=%s (YAML use_percentiles)",
+        "[gr00t_sharded] action/state bounds=%s (YAML use_percentiles) relative=%s",
         "q01/q99" if use_percentiles else "min/max",
+        use_relative_action,
     )
 
     included = set()
@@ -315,6 +537,8 @@ def get_vla_dataset(
         with run_or_wait_on_rank0(label=f"generate_stats({dataset_path})") as is_rank0:
             if is_rank0:
                 generate_stats(dataset_path)
+                if use_relative_action:
+                    write_relative_action_stats(dataset_path, modality_configs)
         dataset = TaggedShardedSingleStepDataset(
             dataset_path=dataset_path,
             stats_tag=tag,
@@ -332,6 +556,7 @@ def get_vla_dataset(
         include_state=include_state,
         use_percentiles=use_percentiles,
         clip_outliers=True,
+        use_relative_action=use_relative_action,
     )
     mixture = ShardedMixtureDataset(
         datasets=datasets,

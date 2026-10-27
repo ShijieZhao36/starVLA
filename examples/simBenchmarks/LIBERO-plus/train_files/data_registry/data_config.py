@@ -6,6 +6,7 @@ front / right_wrist, right_eef (rotation_6d, 9) + right_gripper (1).
 This is not the 7-D ``libero_franka`` layout.
 """
 
+from gr00t.data.types import ActionConfig, ActionFormat, ActionRepresentation, ActionType
 from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
 from starVLA.dataloader.gr00t_lerobot.transform.base import ComposedModalityTransform
@@ -39,6 +40,24 @@ class LiberoPlusRot6dDataConfig:
         "action.right_eef": 9,
         "action.right_gripper": 1,
     }
+    # Parallel to action_keys. Consumed only by gr00t_sharded. Keys are unprefixed
+    # because extract_step_data stores groups as "right_eef", not "action.right_eef".
+    # right_eef is an absolute xyz+rot6d pose on disk; the processor subtracts the
+    # chunk-start state when use_relative_action is true. The gripper stays absolute.
+    action_configs = [
+        ActionConfig(
+            rep=ActionRepresentation.RELATIVE,
+            type=ActionType.EEF,
+            format=ActionFormat.XYZ_ROT6D,
+            state_key="right_eef",
+        ),
+        ActionConfig(
+            rep=ActionRepresentation.ABSOLUTE,
+            type=ActionType.NON_EEF,
+            format=ActionFormat.DEFAULT,
+            state_key="right_gripper",
+        ),
+    ]
     language_keys = ["annotation.human.action.task_description"]
     observation_indices = [0]
     action_indices = list(range(8))
@@ -90,9 +109,9 @@ ROBOT_TYPE_CONFIG_MAP = {
     _ROBOT_TYPE: LiberoPlusRot6dDataConfig(),
 }
 
-# Directory name under data_root_dir. The stage1 root is named ``dataset``.
+# Directory name under data_root_dir.
 DATASET_NAMED_MIXTURES = {
     "libero_plus_stage1": [
-        ("dataset", 1.0, _ROBOT_TYPE),
+        ("dataset_absolute", 1.0, _ROBOT_TYPE),
     ],
 }

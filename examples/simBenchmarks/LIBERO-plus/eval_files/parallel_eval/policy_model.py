@@ -1,3 +1,4 @@
+import importlib.util
 import os
 from collections import deque
 from pathlib import Path
@@ -9,6 +10,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from gr00t.data.state_action.pose import EndEffectorPose
+from gr00t.data.types import ActionFormat
+from starVLA.dataloader.gr00t_sharded import data_config_to_gr00t_modality_configs
+from starVLA.dataloader.gr00t_sharded_processor import StarVLAPackProcessor
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.tools import read_mode_config
 
@@ -18,6 +22,37 @@ _ROT6D_ROTATION_SCALE_RAD = 0.5
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
+
+
+def _split_flat_action_stats(flat: dict, keys: list[str], dims: list[int]) -> dict[str, dict[str, np.ndarray]]:
+    """Slice a concatenated action-stats vector back into per-key groups."""
+    grouped = {key: {} for key in keys}
+    names = [name for name in ("min", "max", "mean", "std", "q01", "q99") if name in flat]
+    if not names:
+        raise KeyError(f"action stats are missing min/max/q01/q99 fields: {list(flat)}")
+    for name in names:
+        values = np.asarray(flat[name], dtype=np.float64)
+        offset = 0
+        for key, dim in zip(keys, dims):
+            grouped[key][name] = values[..., offset : offset + dim]
+            offset += dim
+        if offset != values.shape[-1]:
+            raise ValueError(
+                f"Action stat {name} last dimension {values.shape[-1]} does not match key dims {dims}"
+            )
+    return grouped
+
+
+def obs_eef_quat_to_xyz_rot6d(pos, quat_xyzw) -> np.ndarray:
+    """Match training ``state.right_eef``: xyz plus the first two rotation-matrix rows.
+
+    Robosuite stores ``robot0_eef_quat`` in xyzw order.
+    """
+    position = np.asarray(pos, dtype=np.float64).reshape(3)
+    quat = np.asarray(quat_xyzw, dtype=np.float64).reshape(4)
+    matrix = Rotation.from_quat(quat).as_matrix()
+    rot6d = matrix[:2, :].reshape(6)
+    return np.concatenate([position, rot6d]).astype(np.float32)
 
 
 class AdaptiveEnsembler:
@@ -122,6 +157,7 @@ class PolicyModel:
 
         self.action_norm_stats = self.get_action_stats(self.unnorm_key, policy_ckpt_path=policy_ckpt_path)
         self.action_chunk_size = self.get_action_chunk_size(policy_ckpt_path=policy_ckpt_path)
+        self._relative_processor = None
 
     def _add_image_to_history(self, image: np.ndarray) -> None:
         self.image_history.append(image)
@@ -153,6 +189,9 @@ class PolicyModel:
         response = self.vla.predict_action(example, **vla_input)
         normalized_actions = response["normalized_actions"]  # B, chunk, D
         normalized_actions = normalized_actions[0]
+        raw_right_eef = example.get("raw_right_eef")
+        if normalized_actions.shape[1] == 10 and raw_right_eef is not None:
+            return self._absolute_rot6d_to_osc(normalized_actions, raw_right_eef)
         if normalized_actions.shape[1] == 10:
             return self.unnormalize_rot6d_actions(
                 normalized_actions=normalized_actions, action_norm_stats=self.action_norm_stats
@@ -196,6 +235,71 @@ class PolicyModel:
         }
 
         return {"raw_action": raw_action}
+
+    def _relative_decode_processor(self) -> StarVLAPackProcessor:
+        if self._relative_processor is not None:
+            return self._relative_processor
+        config_path = Path(__file__).resolve().parents[2] / "train_files" / "data_registry" / "data_config.py"
+        spec = importlib.util.spec_from_file_location("libero_plus_data_config", config_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load LIBERO-plus data config from {config_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data_config = module.LiberoPlusRot6dDataConfig()
+        modality_configs = data_config_to_gr00t_modality_configs(data_config)
+        tag = data_config.embodiment_tag.value
+        keys = list(data_config.action_keys)
+        dims = [int(data_config.action_key_dims[key]) for key in keys]
+        grouped = _split_flat_action_stats(self.action_norm_stats, [key.split(".", 1)[-1] for key in keys], dims)
+        action_configs = modality_configs["action"].action_configs or []
+        relative = {
+            key: grouped[key]
+            for key, action_config in zip([key.split(".", 1)[-1] for key in keys], action_configs)
+            if action_config.rep.name == "RELATIVE"
+        }
+        use_percentiles = bool(self.action_norm_stats.get("use_percentiles", True))
+        processor = StarVLAPackProcessor(
+            modality_configs={tag: modality_configs},
+            include_state=False,
+            use_percentiles=use_percentiles,
+            clip_outliers=True,
+            use_relative_action=True,
+        )
+        processor.set_statistics({tag: {"action": grouped, "relative_action": relative}}, override=True)
+        self._relative_processor = processor
+        self._relative_tag = tag
+        return processor
+
+    def _absolute_rot6d_to_osc(self, normalized_actions: np.ndarray, raw_right_eef) -> np.ndarray:
+        """Unnormalize a relative chunk, restore the absolute pose, then make an OSC delta.
+
+        ``raw_right_eef`` is the current observation as xyz+rot6d, the same layout as
+        training ``state.right_eef``. LIBERO still consumes a 7-vector: world-frame
+        xyz delta, rotvec, gripper. The 0.05 m and 0.5 rad scales are the controller
+        input ranges used by the previous rot6d eval path.
+        """
+        current = np.asarray(raw_right_eef, dtype=np.float32).reshape(-1)
+        if current.shape[0] != 9:
+            raise ValueError(f"raw_right_eef must have length 9, got {current.shape}")
+        processor = self._relative_decode_processor()
+        decoded = processor.decode_action(
+            np.asarray(normalized_actions, dtype=np.float32),
+            self._relative_tag,
+            state={"right_eef": current[None, :]},
+        )
+        absolute_eef = np.asarray(decoded["right_eef"], dtype=np.float64)
+        gripper = np.asarray(decoded["right_gripper"], dtype=np.float32).reshape(-1, 1)
+        current_pose = EndEffectorPose(
+            translation=current[:3], rotation=current[3:], rotation_type="rot6d"
+        )
+        delta_xyz = (absolute_eef[:, :3] - current[:3]) / _ROT6D_POSITION_SCALE_M
+        rotvecs = np.empty((absolute_eef.shape[0], 3), dtype=np.float64)
+        for index, row in enumerate(absolute_eef):
+            target = EndEffectorPose.from_action_format(row, ActionFormat.XYZ_ROT6D)
+            delta = target - current_pose
+            rotvecs[index] = Rotation.from_matrix(delta.homogeneous[:3, :3]).as_rotvec()
+        rotvecs = rotvecs / _ROT6D_ROTATION_SCALE_RAD
+        return np.concatenate([delta_xyz, rotvecs, gripper], axis=-1).astype(np.float32)
 
     @staticmethod
     def unnormalize_actions(

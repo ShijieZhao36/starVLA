@@ -12,6 +12,7 @@ import time
 import numpy as np
 import tqdm
 import tyro
+from scipy.spatial.transform import Rotation
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 
@@ -20,6 +21,14 @@ from examples.simBenchmarks.LIBERO.eval_files.model2libero_interface import Mode
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
+
+
+def _obs_eef_quat_to_xyz_rot6d(pos, quat_xyzw) -> np.ndarray:
+    """xyz plus the first two rows of the rotation matrix. Quat is robosuite xyzw."""
+    position = np.asarray(pos, dtype=np.float64).reshape(3)
+    quat = np.asarray(quat_xyzw, dtype=np.float64).reshape(4)
+    matrix = Rotation.from_quat(quat).as_matrix()
+    return np.concatenate([position, matrix[:2, :].reshape(6)]).astype(np.float32)
 
 
 def _binarize_gripper_open(open_val: np.ndarray | float) -> np.ndarray:
@@ -242,6 +251,9 @@ def eval_libero(args: Args) -> None:
                 example_dict = {
                     "image": [observation["observation.primary"][0], observation["observation.wrist_image"][0]],
                     "lang": observation["instruction"][0],
+                    "raw_right_eef": _obs_eef_quat_to_xyz_rot6d(
+                        obs["robot0_eef_pos"], obs["robot0_eef_quat"]
+                    ),
                 }
 
                 start_time = time.time()

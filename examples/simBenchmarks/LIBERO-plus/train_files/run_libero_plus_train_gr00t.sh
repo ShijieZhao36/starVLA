@@ -3,7 +3,7 @@
 # Model: Qwen3-VL-PI, framework name QwenPI, backbone Qwen3-VL-4B-Instruct.
 #
 # data_mix "libero_plus_stage1" resolves to:
-#   ${libero_plus_data_root}/dataset
+#   ${libero_plus_data_root}/dataset_absolute
 # Keys are front / right_wrist and right_eef (9) + right_gripper (1).
 # gr00t_sharded decodes video with torchcodec; video_backend is not passed.
 
@@ -12,7 +12,7 @@
 Framework_name=QwenPI
 freeze_module_list=''
 base_vlm=playground/Pretrained_models/Qwen3-VL-4B-Instruct
-config_yaml=./examples/simBenchmarks/LIBERO/train_files/starvla_cotrain_libero.yaml
+config_yaml=./examples/simBenchmarks/LIBERO-plus/train_files/starvla_libero_plus_gr00t_sharded.yaml
 libero_plus_data_root=/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1
 data_mix=libero_plus_stage1
 run_root_dir=/mnt/zhaoshijie/checkpoints/starVLA
@@ -55,6 +55,7 @@ accelerate launch \
   --datasets.vla_data.dataset_py gr00t_sharded \
   --datasets.vla_data.data_root_dir ${libero_plus_data_root} \
   --datasets.vla_data.data_mix ${data_mix} \
+  --datasets.vla_data.use_relative_action true \
   --datasets.vla_data.per_device_batch_size 8 \
   --trainer.freeze_modules ${freeze_module_list} \
   --trainer.max_train_steps 120000 \
