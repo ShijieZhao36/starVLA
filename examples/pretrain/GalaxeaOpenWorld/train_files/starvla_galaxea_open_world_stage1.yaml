@@ -1,4 +1,4 @@
-run_id: galaxea_open_world_stage1_qwen3vl_pi_gr00t_60k
+run_id: galaxea_open_world_stage1_qwen3vl_pi_gr00t_80k
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: your_wandb_entity
@@ -29,6 +29,11 @@ datasets:
     canonical_layout: examples/pretrain/canonical/bimanual_v1.yaml
     canonical_robots: examples/pretrain/canonical/robots
     include_state: false
+    # PIL size is (width, height). Training forward resizes before Qwen3-VL.
+    obs_image_size: [256, 256]
+    # Precomputed uint8 frames, one file per episode per camera:
+    # <root>/<subset_id>/<video_key>/episode_XXXXXX.npy. Missing files error.
+    frame_cache_dir: /mnt/zhaoshijie/frame_cache/galaxea_stage1_256
     use_percentiles: true
     # Disk EEF actions are absolute xyz+rot6d. The processor rewrites left_eef
     # and right_eef relative to the chunk-start state. Grippers, arm joints,
@@ -40,7 +45,7 @@ datasets:
     episode_sampling_rate: 1.0
 
 trainer:
-  max_train_steps: 60000
+  max_train_steps: 80000
   num_warmup_steps: 5000
   save_interval: 10000
   eval_interval: 100

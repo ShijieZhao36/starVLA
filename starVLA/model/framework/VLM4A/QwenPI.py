@@ -208,6 +208,10 @@ class Qwen_PI(baseframework):
 
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # [B, 1, state_dim]
 
+        train_obs_image_size = getattr(self.config.datasets.vla_data, "obs_image_size", None)
+        if train_obs_image_size:
+            batch_images = resize_images(batch_images, target_size=tuple(train_obs_image_size))
+
         # Step 1: encode through QwenVL
         vl_embs_list, backbone_attention_mask = self._encode_vl_hidden_states(batch_images, instructions)
         base_hidden = vl_embs_list[-1]

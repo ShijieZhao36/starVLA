@@ -1,12 +1,13 @@
 # Copyright 2025 starVLA community. All rights reserved.
 # Licensed under the MIT License.
 
-"""starVLA adapter around unmodified GR00T sharded LeRobot I/O.
+"""starVLA adapter around GR00T sharded LeRobot I/O.
 
 ``dataset_py: gr00t_sharded`` keeps the starVLA sample contract and mix registry,
 but loads via GR00T ``ShardedSingleStepDataset`` / ``ShardedMixtureDataset``.
-Video decoding uses GR00T ``video_utils`` (torchcodec); YAML ``video_backend``
-is ignored on this path.
+Video decoding uses GR00T ``video_utils`` (torchcodec) unless
+``datasets.vla_data.frame_cache_dir`` is set. That cache is read with mmap
+and a missing file is an error. YAML ``video_backend`` is ignored on this path.
 """
 
 from __future__ import annotations
@@ -599,6 +600,14 @@ def _include_state(data_cfg) -> bool:
     return _cfg_get(data_cfg, "include_state", False) not in ["False", False]
 
 
+def _dataset_frame_cache_dir(frame_cache_root, dataset_name: str) -> Path | None:
+    """``{root}/{subset_id}`` for mixture entries like ``<subset_id>/stage1/dataset``."""
+    if frame_cache_root in (None, ""):
+        return None
+    subset_id = Path(str(dataset_name)).parts[0]
+    return Path(frame_cache_root) / subset_id
+
+
 def _as_bool(value, default: bool = False) -> bool:
     if value is None:
         return default
@@ -641,6 +650,11 @@ def get_vla_dataset(
     use_relative_action = _as_bool(_cfg_get(data_cfg, "use_relative_action", False), default=False)
     layout_path = _cfg_get(data_cfg, "canonical_layout", None)
     robots_path = _cfg_get(data_cfg, "canonical_robots", None)
+    frame_cache_root = _cfg_get(data_cfg, "frame_cache_dir", None)
+    if isinstance(frame_cache_root, str):
+        frame_cache_root = frame_cache_root.strip() or None
+    if frame_cache_root:
+        logger.info("[gr00t_sharded] Reading frames from cache %s", frame_cache_root)
     canonical_layout = None
     robot_maps = None
     if layout_path or robots_path:
@@ -713,6 +727,7 @@ def get_vla_dataset(
             episode_sampling_rate=episode_sampling_rate,
             seed=seed,
             allow_padding=allow_padding,
+            frame_cache_dir=_dataset_frame_cache_dir(frame_cache_root, d_name),
         )
         datasets.append(dataset)
         weights.append(float(d_weight))

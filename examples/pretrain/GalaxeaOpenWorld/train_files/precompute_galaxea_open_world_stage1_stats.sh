@@ -2,7 +2,7 @@
 # Precompute dataset stats before Galaxea Open World stage1 training.
 #
 # Rank 0 otherwise builds meta/stats.json and meta/relative_stats.json inside
-# an NCCL barrier. This mixture is 219 subsets, so the other ranks can hit the
+# an NCCL barrier. This mixture is 218 subsets, so the other ranks can hit the
 # 30-minute process-group timeout. Run this once, with the training env
 # active, before run_galaxea_open_world_stage1.sh:
 #

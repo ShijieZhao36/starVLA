@@ -1,13 +1,14 @@
 """Galaxea Open World R1 Lite stage1 registration for QwenPI + gr00t_sharded.
 
-All 219 subsets share one ``meta/modality.json``. Disk actions are 41-D and
+All 218 subsets share one ``meta/modality.json``. Disk actions are 41-D and
 absolute. Training rewrites ``left_eef`` and ``right_eef`` relative to the
 chunk-start state. Grippers, arm joints, ``torso_twist``, and
 ``chassis_velocity`` stay absolute.
 
 ``head_right`` is present on disk and is not used.
 ``Turn_On_And_Off_The_Air_Conditioner_20250802_012`` has no stage1 dataset
-and is omitted.
+and is omitted. ``Clean_The_Sofa20250627_002`` is omitted because two front
+videos contain invalid AV1 packets.
 
 Paths are relative to ``data_root_dir``
 ``/mnt/zhanghao/Galaxea-Open-World-Dataset/_processed``.
@@ -194,7 +195,6 @@ _SUBSETS = (
     "Clean_The_Sink_20250710_006",
     "Clean_The_Sink_20250721_008",
     "Clean_The_Sink_20250730_012",
-    "Clean_The_Sofa20250627_002",
     "Clean_The_Toilet20250618_001",
     "Clean_Toilet_20250625_002",
     "Clothes_Into_The_Basket_20250728_010",

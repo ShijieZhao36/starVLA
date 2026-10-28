@@ -24,6 +24,25 @@ from gr00t.data.types import EmbodimentTag, MessageType, ModalityConfig, VLAStep
 from .lerobot_episode_loader import LeRobotEpisodeLoader
 
 
+def video_indices_for_steps(
+    step_indices,
+    delta_indices,
+    episode_length: int,
+    allow_padding: bool = False,
+) -> np.ndarray:
+    """Unique frame timestamps needed to extract ``step_indices``."""
+    needed: set[int] = set()
+    last = episode_length - 1
+    for step in step_indices:
+        for delta in delta_indices:
+            index = int(step) + int(delta)
+            if allow_padding:
+                index = min(max(index, 0), last)
+            if 0 <= index < episode_length:
+                needed.add(index)
+    return np.array(sorted(needed), dtype=np.int64)
+
+
 def extract_step_data(
     episode_data: pd.DataFrame,
     step_index: int,
@@ -135,6 +154,7 @@ class ShardedSingleStepDataset(ShardedDataset):
         episode_sampling_rate: float = 0.1,
         seed: int = 42,
         allow_padding: bool = False,
+        frame_cache_dir: str | Path | None = None,
     ):
         """Initialize single-step dataset with sharding configuration."""
         super().__init__(dataset_path)
@@ -152,6 +172,7 @@ class ShardedSingleStepDataset(ShardedDataset):
         self.episode_loader = LeRobotEpisodeLoader(
             dataset_path=dataset_path,
             modality_configs=modality_configs,
+            frame_cache_dir=frame_cache_dir,
         )
 
         # Create balanced shards from episode timesteps
@@ -287,9 +308,22 @@ class ShardedSingleStepDataset(ShardedDataset):
         """
         episodes = self.sharded_episodes[idx]
         datapoints = []
+        use_frame_cache = self.episode_loader.frame_cache_dir is not None
+        video_cfg = self.modality_configs.get("video")
         for ep_idx, step_indices in episodes:
-            # Load episode data once per episode in shard
-            episode_data = self.episode_loader[ep_idx]
+            if use_frame_cache:
+                # Copy only the frames this shard's steps actually read.
+                episode_length = self.episode_loader.get_episode_length(ep_idx)
+                deltas = video_cfg.delta_indices if video_cfg is not None else [0]
+                video_indices = video_indices_for_steps(
+                    step_indices,
+                    deltas,
+                    episode_length,
+                    allow_padding=self.allow_padding,
+                )
+                episode_data = self.episode_loader.load_episode(ep_idx, video_indices)
+            else:
+                episode_data = self.episode_loader[ep_idx]
             for step_index in step_indices:
                 datapoints.append(self.get_datapoint(episode_data, step_index))
         return datapoints

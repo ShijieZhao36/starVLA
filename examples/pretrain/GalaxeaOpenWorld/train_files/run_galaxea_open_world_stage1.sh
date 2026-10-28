@@ -18,7 +18,7 @@ config_yaml=./examples/pretrain/GalaxeaOpenWorld/train_files/starvla_galaxea_ope
 galaxea_data_root=/mnt/zhanghao/Galaxea-Open-World-Dataset/_processed
 data_mix=galaxea_open_world_stage1
 run_root_dir=/mnt/zhaoshijie/checkpoints/starVLA
-run_id=galaxea_open_world_stage1_qwen3vl_pi_gr00t_60k
+run_id=galaxea_open_world_stage1_qwen3vl_pi_gr00t_80k
 # Leave empty to train the QwenPI head from the base VLM.
 pretrained_checkpoint="${PRETRAINED_CHECKPOINT:-}"
 # === End of environment variable configuration ===
@@ -56,7 +56,7 @@ accelerate launch \
   --datasets.vla_data.use_relative_action true \
   --datasets.vla_data.per_device_batch_size 8 \
   --trainer.freeze_modules ${freeze_module_list} \
-  --trainer.max_train_steps 60000 \
+  --trainer.max_train_steps 80000 \
   --trainer.save_interval 10000 \
   --trainer.logging_frequency 100 \
   --trainer.eval_interval 100 \

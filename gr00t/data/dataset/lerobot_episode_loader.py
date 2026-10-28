@@ -42,6 +42,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from gr00t.data.dataset.frame_cache import frame_cache_path, read_cached_frames
 from gr00t.data.types import ModalityConfig
 from gr00t.utils.initial_actions import INITIAL_ACTIONS_FILENAME, load_initial_actions
 from gr00t.utils.video_utils import get_frames_by_indices
@@ -97,6 +98,8 @@ class LeRobotEpisodeLoader:
         modality_configs: Dictionary mapping modality names to ModalityConfig objects
                          that specify temporal sampling and data keys to load
         decoder_kwargs: Additional arguments for the video decoder
+        frame_cache_dir: Directory of precomputed ``{video_key}/episode_XXXXXX.npy``
+                         frames for this dataset. Unset keeps video decoding.
 
     Example:
         >>> loader = LeRobotEpisodeLoader(
@@ -117,6 +120,7 @@ class LeRobotEpisodeLoader:
         dataset_path: str | Path,
         modality_configs: dict[str, ModalityConfig],
         decoder_kwargs: dict[str, Any] | None = None,
+        frame_cache_dir: str | Path | None = None,
     ) -> None:
         """
         Initialize LeRobot episode loader with dataset path and modality configurations.
@@ -128,6 +132,7 @@ class LeRobotEpisodeLoader:
         """
         self.dataset_path = Path(dataset_path)
         self.decoder_kwargs = decoder_kwargs
+        self.frame_cache_dir = None if frame_cache_dir in (None, "") else Path(frame_cache_dir)
 
         if not self.dataset_path.is_dir():
             raise FileNotFoundError(f"Dataset path does not exist: {self.dataset_path}")
@@ -438,12 +443,16 @@ class LeRobotEpisodeLoader:
             )
             video_path = self.dataset_path / video_filename
 
-            # Decode video frames at specified timestamps
-            video_data[image_key] = get_frames_by_indices(
-                str(video_path),
-                indices,
-                decoder_kwargs=self.decoder_kwargs or {},
-            )
+            if self.frame_cache_dir is not None:
+                # Missing cache files raise. Do not decode the source video.
+                cache_path = frame_cache_path(self.frame_cache_dir, original_key, episode_index)
+                video_data[image_key] = read_cached_frames(cache_path, indices)
+            else:
+                video_data[image_key] = get_frames_by_indices(
+                    str(video_path),
+                    indices,
+                    decoder_kwargs=self.decoder_kwargs or {},
+                )
 
         return video_data
 
@@ -563,19 +572,25 @@ class LeRobotEpisodeLoader:
         return new_languages
 
     def __getitem__(self, idx: int) -> pd.DataFrame:
-        """
-        Load complete episode data as a processed DataFrame.
+        """Load one episode. Video frames cover every timestamp."""
+        return self.load_episode(idx)
 
-        Combines parquet data loading and video decoding to create a unified DataFrame
-        containing all modality data for the episode. Video frames are converted to
-        PIL Images and stored in the DataFrame.
+    def load_episode(self, idx: int, video_indices: np.ndarray | None = None) -> pd.DataFrame:
+        """
+        Load episode data as a processed DataFrame.
+
+        Parquet, language, and masks are loaded for the episode. Video frames are
+        loaded only at ``video_indices``. When that argument is omitted, every
+        frame is loaded, which is the previous behavior.
 
         Args:
             idx: Episode index to load
+            video_indices: Frame positions to fill in the video columns. Other
+                positions stay empty. Indices are episode timestamps.
 
         Returns:
-            DataFrame with columns for all modalities and timestamps, with video frames
-            as PIL Images ready for further processing
+            DataFrame with columns for all modalities. Video cells are numpy
+            frames at the requested timestamps.
 
         Raises:
             IndexError: If episode index is out of bounds
@@ -600,15 +615,29 @@ class LeRobotEpisodeLoader:
         actual_length = min(len(df), nominal_length)
         df = df.iloc[:actual_length]
 
-        # Load synchronized video data
-        video_data = self._load_video_data(episode_id, np.arange(actual_length))
+        if video_indices is None:
+            video_indices = np.arange(actual_length)
+        else:
+            video_indices = np.unique(np.asarray(video_indices, dtype=np.int64))
+            if video_indices.size and (
+                int(video_indices[0]) < 0 or int(video_indices[-1]) >= actual_length
+            ):
+                raise IndexError(
+                    f"Video indices {int(video_indices[0])}..{int(video_indices[-1])} "
+                    f"fall outside episode length {actual_length}"
+                )
 
-        # Add video frames to dataframe as PIL Images
+        video_data = self._load_video_data(episode_id, video_indices)
+
         for key in video_data.keys():
-            assert len(video_data[key]) == len(df), (
-                f"Video data for {key} has length {len(video_data[key])} but dataframe has length {len(df)}"
+            frames = video_data[key]
+            assert len(frames) == len(video_indices), (
+                f"Video data for {key} has length {len(frames)} but {len(video_indices)} indices were requested"
             )
-            df[f"video.{key}"] = [frame for frame in video_data[key]]
+            column = [None] * actual_length
+            for position, frame in zip(video_indices, frames):
+                column[int(position)] = frame
+            df[f"video.{key}"] = column
 
         # Load synchronized mask data
         mask_data = self._load_mask_data(episode_id, np.arange(actual_length))
