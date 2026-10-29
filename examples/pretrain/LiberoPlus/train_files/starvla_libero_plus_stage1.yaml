@@ -1,0 +1,71 @@
+run_id: libero_plus_canonical_qwen3vl_pi_gr00t_80k
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: your_wandb_entity
+wandb_project: pretrain
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenPI
+  qwenvl:
+    base_vlm: ./playground/Pretrained_models/Qwen3-VL-4B-Instruct
+    attn_implementation: flash_attention_2
+    vl_hidden_dim: 2048
+  action_model:
+    # Canonical bimanual vector. LIBERO-plus fills right.eef_pose and right.gripper.
+    action_dim: 90
+    # Same width as the canonical state. include_state is false, so the
+    # state encoder is built and not called.
+    state_dim: 90
+    action_horizon: 8
+
+datasets:
+  vla_data:
+    dataset_py: gr00t_sharded
+    # Parent of dataset_absolute. The mix appends that directory name.
+    data_root_dir: /mnt/zhaoshijie/dataset/_processed/libero_plus/stage1
+    data_mix: libero_plus_stage1
+    canonical_layout: examples/pretrain/canonical/bimanual_v1.yaml
+    canonical_robots: examples/pretrain/canonical/robots
+    include_state: false
+    # PIL size is (width, height). Frames are already 256x256.
+    obs_image_size: [256, 256]
+    # <root>/dataset_absolute/<video_key>/episode_XXXXXX.npy. Missing files error.
+    frame_cache_dir: /mnt/zhaoshijie/frame_cache/libero_plus_stage1_256
+    use_percentiles: true
+    # Disk right_eef is absolute xyz+rot6d. The processor rewrites it relative
+    # to the chunk-start state. right_gripper stays absolute.
+    use_relative_action: true
+    per_device_batch_size: 8
+    num_workers: 4
+    shard_size: 1024
+    episode_sampling_rate: 1.0
+
+trainer:
+  max_train_steps: 80000
+  num_warmup_steps: 5000
+  save_interval: 10000
+  eval_interval: 100
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 100
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
+
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08
