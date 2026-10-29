@@ -1,0 +1,21 @@
+# Fill the canonical layout from Xperience human stage1 groups.
+# start is the offset inside the named field. Omitted groups stay zero and masked.
+robot_type: xperience_human
+action:
+  - field: left.eef_pose
+    source: left_eef
+  - field: left.fingertips
+    source: left_fingertips
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.fingertips
+    source: right_fingertips
+state:
+  - field: left.eef_pose
+    source: left_eef
+  - field: left.fingertips
+    source: left_fingertips
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.fingertips
+    source: right_fingertips

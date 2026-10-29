@@ -89,6 +89,44 @@ class CanonicalLayoutTest(unittest.TestCase):
         self.assertTrue(np.all(mask[0, reserved.start : reserved.start + 3] == 1))
         self.assertTrue(np.all(mask[0, reserved.start + 3 : reserved.start + 9] == 0))
 
+    def test_xperience_mask_covers_eef_and_fingertips(self):
+        robot = self.maps["xperience_human"]
+        groups = {
+            "left_eef": _block(9, 0.1, steps=1),
+            "left_fingertips": np.arange(15, dtype=np.float32)[None, :],
+            "right_eef": _block(9, 0.4, steps=1),
+            "right_fingertips": _block(15, 0.5, steps=1),
+        }
+        empty = (
+            "left.joint_pos",
+            "left.gripper",
+            "right.joint_pos",
+            "right.gripper",
+            "reserved",
+        )
+        for placements in (robot.action, robot.state):
+            vector, mask = scatter(groups, placements, self.layout.dim)
+            self.assertEqual(vector.shape, (1, 90))
+            self.assertEqual(int(mask.sum()), 48)
+            for name in empty:
+                field = self.layout.fields[name]
+                span = slice(field.start, field.start + field.dim)
+                self.assertTrue(np.all(mask[0, span] == 0))
+                self.assertTrue(np.all(vector[0, span] == 0))
+            left_eef = self.layout.fields["left.eef_pose"]
+            left_fingers = self.layout.fields["left.fingertips"]
+            right_fingers = self.layout.fields["right.fingertips"]
+            self.assertTrue(np.allclose(vector[0, left_eef.start : left_eef.start + 9], 0.1))
+            self.assertTrue(np.all(mask[0, left_fingers.start : left_fingers.start + 15] == 1))
+            self.assertTrue(
+                np.allclose(vector[0, left_fingers.start : left_fingers.start + 15], np.arange(15))
+            )
+            self.assertTrue(np.all(mask[0, right_fingers.start : right_fingers.start + 15] == 1))
+            self.assertTrue(np.allclose(vector[0, right_fingers.start : right_fingers.start + 15], 0.5))
+            restored = gather(vector, placements)
+            self.assertTrue(np.allclose(restored["left_fingertips"], groups["left_fingertips"]))
+            self.assertTrue(np.allclose(restored["right_eef"], groups["right_eef"]))
+
     def test_overlapping_write_is_rejected(self):
         data = {
             "robot_type": "overlap",

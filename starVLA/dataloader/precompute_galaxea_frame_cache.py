@@ -27,6 +27,25 @@ DEFAULT_SIZE = 256
 DEFAULT_CHUNK = 32
 
 
+def camera_names() -> tuple[str, ...]:
+    """Cameras to cache. ``CACHE_CAMERAS`` is a comma-separated override."""
+    raw = os.environ.get("CACHE_CAMERAS", "").strip()
+    if not raw:
+        return CAMERA_NAMES
+    names = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if not names:
+        raise ValueError("CACHE_CAMERAS did not contain a camera name")
+    return names
+
+
+def _data_root_from_env() -> Path:
+    """Prefer ``DATA_ROOT``. ``GALAXEA_DATA_ROOT`` remains the Galaxea default."""
+    raw = os.environ.get("DATA_ROOT", "").strip() or os.environ.get("GALAXEA_DATA_ROOT", "").strip()
+    if not raw:
+        raise KeyError("Set DATA_ROOT or GALAXEA_DATA_ROOT")
+    return Path(raw)
+
+
 def _available_cpus() -> int:
     try:
         return len(os.sched_getaffinity(0))
@@ -131,10 +150,10 @@ def cache_one(job: tuple) -> str:
     return f"write {out_path}"
 
 
-def _original_video_keys(modality: dict) -> list[str]:
+def _original_video_keys(modality: dict, names: tuple[str, ...]) -> list[str]:
     video = modality.get("video", {})
     keys = []
-    for name in CAMERA_NAMES:
+    for name in names:
         if name not in video:
             raise KeyError(f"modality.json is missing video key {name!r}")
         keys.append(video[name].get("original_key", f"observation.images.{name}"))
@@ -156,7 +175,7 @@ def build_jobs(data_root: Path, mixture: list, cache_root: Path, size: int, chun
             info = json.load(handle)
         with (meta / "modality.json").open() as handle:
             modality = json.load(handle)
-        video_keys = _original_video_keys(modality)
+        video_keys = _original_video_keys(modality, camera_names())
         chunks_size = int(info["chunks_size"])
         pattern = info["video_path"]
         subset_id = Path(dataset_name).parts[0]
@@ -182,8 +201,9 @@ def build_jobs(data_root: Path, mixture: list, cache_root: Path, size: int, chun
 def main() -> None:
     from starVLA.dataloader.gr00t_lerobot.registry import DATASET_NAMED_MIXTURES
 
-    data_root = Path(os.environ["GALAXEA_DATA_ROOT"])
+    data_root = _data_root_from_env()
     data_mix = os.environ["DATA_MIX"]
+    names = camera_names()
     cache_root = Path(os.environ["FRAME_CACHE_DIR"])
     size = int(os.environ.get("CACHE_SIZE", DEFAULT_SIZE))
     chunk = int(os.environ.get("CACHE_CHUNK", DEFAULT_CHUNK))
@@ -202,7 +222,8 @@ def main() -> None:
     workers = max(1, min(workers, len(jobs)))
     print(
         f"mixture {data_mix}: {len(jobs)} episode-cameras under {cache_root} "
-        f"with {workers} workers ({_available_cpus()} cpus, chunk {chunk})",
+        f"cameras={','.join(names)} with {workers} workers "
+        f"({_available_cpus()} cpus, chunk {chunk})",
         flush=True,
     )
 

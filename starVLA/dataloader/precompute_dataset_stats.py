@@ -66,10 +66,18 @@ def precompute_one(dataset_path: str, robot_type: str) -> str:
     return str(path)
 
 
+def _data_root_from_env() -> Path:
+    """Prefer ``DATA_ROOT``. ``GALAXEA_DATA_ROOT`` remains the Galaxea default."""
+    raw = os.environ.get("DATA_ROOT", "").strip() or os.environ.get("GALAXEA_DATA_ROOT", "").strip()
+    if not raw:
+        raise KeyError("Set DATA_ROOT or GALAXEA_DATA_ROOT")
+    return Path(raw)
+
+
 def main() -> None:
     from starVLA.dataloader.gr00t_lerobot.registry import DATASET_NAMED_MIXTURES
 
-    data_root = Path(os.environ["GALAXEA_DATA_ROOT"])
+    data_root = _data_root_from_env()
     data_mix = os.environ["DATA_MIX"]
     if data_mix not in DATASET_NAMED_MIXTURES:
         raise KeyError(f"Unknown data_mix={data_mix!r}. Available: {sorted(DATASET_NAMED_MIXTURES)}")
