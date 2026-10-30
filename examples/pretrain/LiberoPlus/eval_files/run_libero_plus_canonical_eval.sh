@@ -13,14 +13,14 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 export PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}:${LIBERO_HOME}"
 
-pretrained_path="${PRETRAINED_PATH:-/mnt/zhaoshijie/checkpoints/starVLA/libero_plus_canonical_qwen3vl_pi_gr00t_80k/checkpoints/steps_80000_pytorch_model.pt}"
-output_dir="${OUTPUT_DIR:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_canonical_qwen3vl_pi_gr00t_80k}"
+pretrained_path="${PRETRAINED_PATH:-/mnt/zhaoshijie/checkpoints/starVLA/libero_plus_canonical_qwen3vl_pi_gr00t_60k_1029/checkpoints/steps_60000_pytorch_model.pt}"
+output_dir="${OUTPUT_DIR:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_canonical_qwen3vl_pi_gr00t_60k_1029}"
 task_suite="${TASK_SUITE:-libero_goal}"
 
 python examples/pretrain/LiberoPlus/eval_files/eval_libero_model.py \
-  --args.pretrained-path "${pretrained_path}" \
-  --args.output-dir "${output_dir}" \
-  --args.task-suite-name "${task_suite}" \
-  --args.num-trials-per-task "${NUM_TRIALS_PER_TASK:-1}" \
-  --args.use-bf16 "${USE_BF16:-true}" \
-  --args.use-canonical-forward "${USE_CANONICAL_FORWARD:-true}"
+  --pretrained_path "${pretrained_path}" \
+  --output_dir "${output_dir}" \
+  --task_suite_name "${task_suite}" \
+  --num_trials_per_task "${NUM_TRIALS_PER_TASK:-1}" \
+  --use_bf16 "${USE_BF16:-true}" \
+  --use_canonical_forward "${USE_CANONICAL_FORWARD:-true}"

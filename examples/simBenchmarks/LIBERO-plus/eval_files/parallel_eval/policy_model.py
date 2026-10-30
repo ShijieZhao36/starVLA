@@ -294,10 +294,12 @@ class PolicyModel:
         )
         delta_xyz = (absolute_eef[:, :3] - current[:3]) / _ROT6D_POSITION_SCALE_M
         rotvecs = np.empty((absolute_eef.shape[0], 3), dtype=np.float64)
+        current_rotation = current_pose.homogeneous[:3, :3]
         for index, row in enumerate(absolute_eef):
             target = EndEffectorPose.from_action_format(row, ActionFormat.XYZ_ROT6D)
-            delta = target - current_pose
-            rotvecs[index] = Rotation.from_matrix(delta.homogeneous[:3, :3]).as_rotvec()
+            # OSC_POSE left-multiplies: R_delta = R_target @ R_current.T.
+            rotation_delta = target.homogeneous[:3, :3] @ current_rotation.T
+            rotvecs[index] = Rotation.from_matrix(rotation_delta).as_rotvec()
         rotvecs = rotvecs / _ROT6D_ROTATION_SCALE_RAD
         return np.concatenate([delta_xyz, rotvecs, gripper], axis=-1).astype(np.float32)
 

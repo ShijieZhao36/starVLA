@@ -74,14 +74,19 @@ def _split_native_action_stats(flat: dict, keys: list[str], dims: list[int]) -> 
 
 
 def osc_delta(target_eef: np.ndarray, live_eef: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """World xyz delta and relative rotvec, both in controller units."""
+    """World xyz delta and world-frame rotvec, both in controller units.
+
+    OSC_POSE left-multiplies the orientation delta onto the current pose, so
+    ``R_delta = R_target @ R_live.T``. Pose subtraction is the body-frame
+    product ``R_live.T @ R_target`` and is not the controller command.
+    """
     target = np.asarray(target_eef, dtype=np.float64).reshape(9)
     live = np.asarray(live_eef, dtype=np.float64).reshape(9)
     delta_xyz = (target[:3] - live[:3]) / _ROT6D_POSITION_SCALE_M
     target_pose = EndEffectorPose(translation=target[:3], rotation=target[3:], rotation_type="rot6d")
     live_pose = EndEffectorPose(translation=live[:3], rotation=live[3:], rotation_type="rot6d")
-    relative = target_pose - live_pose
-    rotvec = Rotation.from_matrix(relative.homogeneous[:3, :3]).as_rotvec() / _ROT6D_ROTATION_SCALE_RAD
+    rotation_delta = target_pose.homogeneous[:3, :3] @ live_pose.homogeneous[:3, :3].T
+    rotvec = Rotation.from_matrix(rotation_delta).as_rotvec() / _ROT6D_ROTATION_SCALE_RAD
     return delta_xyz.astype(np.float32), rotvec.astype(np.float32)
 
 
