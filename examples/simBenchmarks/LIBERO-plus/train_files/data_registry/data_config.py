@@ -1,7 +1,7 @@
 """LIBERO-plus stage1 registration for QwenPI + gr00t_sharded.
 
 Keys match ``meta/modality.json`` of
-``/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1/dataset``:
+``/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1/dataset_relative``:
 front / right_wrist, right_eef (rotation_6d, 9) + right_gripper (1).
 This is not the 7-D ``libero_franka`` layout.
 """
@@ -90,9 +90,9 @@ ROBOT_TYPE_CONFIG_MAP = {
     _ROBOT_TYPE: LiberoPlusRot6dDataConfig(),
 }
 
-# Directory name under data_root_dir. The stage1 root is named ``dataset``.
+# Directory name under data_root_dir.
 DATASET_NAMED_MIXTURES = {
     "libero_plus_stage1": [
-        ("dataset", 1.0, _ROBOT_TYPE),
+        ("dataset_relative", 1.0, _ROBOT_TYPE),
     ],
 }
