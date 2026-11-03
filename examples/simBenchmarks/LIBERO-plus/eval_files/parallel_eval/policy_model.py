@@ -11,6 +11,7 @@ from scipy.spatial.transform import Rotation
 
 from gr00t.data.state_action.pose import EndEffectorPose
 from gr00t.data.types import ActionFormat
+from starVLA.dataloader.canonical_layout import load_layout, load_robot_maps
 from starVLA.dataloader.gr00t_sharded import data_config_to_gr00t_modality_configs
 from starVLA.dataloader.gr00t_sharded_processor import StarVLAPackProcessor
 from starVLA.model.framework.base_framework import baseframework
@@ -19,6 +20,10 @@ from starVLA.model.tools import read_mode_config
 # stage1 conversion_report.json: controller xyz * 0.05 m, axis-angle * 0.5 rad.
 _ROT6D_POSITION_SCALE_M = 0.05
 _ROT6D_ROTATION_SCALE_RAD = 0.5
+_CANONICAL_LAYOUT = "examples/pretrain/canonical/bimanual_v1.yaml"
+_CANONICAL_ROBOTS = "examples/pretrain/canonical/robots"
+_CANONICAL_ROBOT_TYPE = "libero_plus_rot6d"
+_CANONICAL_ACTION_DIM = 90
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
@@ -158,6 +163,7 @@ class PolicyModel:
         self.action_norm_stats = self.get_action_stats(self.unnorm_key, policy_ckpt_path=policy_ckpt_path)
         self.action_chunk_size = self.get_action_chunk_size(policy_ckpt_path=policy_ckpt_path)
         self._relative_processor = None
+        self._canonical_processor = None
 
     def _add_image_to_history(self, image: np.ndarray) -> None:
         self.image_history.append(image)
@@ -179,19 +185,25 @@ class PolicyModel:
         """Stateless chunk inference. ``example['image']`` is already resized.
 
         This is the ``step % action_chunk_size == 0`` branch of ``step``. The
-        returned array is the full unnormalized chunk, shape ``(chunk, 7)``.
+        returned array is ``(chunk, 7)`` OSC for a 10-d model, or ``(chunk, 10)``
+        absolute xyz+rot6d+gripper for a 90-d canonical model.
         """
         vla_input = {
             "do_sample": False,
             "use_ddim": self.use_ddim,
             "num_ddim_steps": self.num_ddim_steps,
         }
+        example = dict(example)
+        example["robot_tag"] = _CANONICAL_ROBOT_TYPE
         response = self.vla.predict_action(example, **vla_input)
         normalized_actions = response["normalized_actions"]  # B, chunk, D
         normalized_actions = normalized_actions[0]
-        raw_right_eef = example.get("raw_right_eef")
-        if normalized_actions.shape[1] == 10 and raw_right_eef is not None:
-            return self._absolute_rot6d_to_osc(normalized_actions, raw_right_eef)
+        if normalized_actions.shape[1] == _CANONICAL_ACTION_DIM:
+            raw_right_eef = example.get("raw_right_eef")
+            if raw_right_eef is None:
+                raise ValueError("90-d canonical inference requires raw_right_eef")
+            return self._canonical_absolute_targets(normalized_actions, raw_right_eef)
+        # 10-d checkpoints keep the direct q01/q99 OSC decode. raw_right_eef is ignored.
         if normalized_actions.shape[1] == 10:
             return self.unnormalize_rot6d_actions(
                 normalized_actions=normalized_actions, action_norm_stats=self.action_norm_stats
@@ -235,6 +247,65 @@ class PolicyModel:
         }
 
         return {"raw_action": raw_action}
+
+    def _canonical_decode_processor(self) -> StarVLAPackProcessor:
+        if self._canonical_processor is not None:
+            return self._canonical_processor
+        config_path = Path(__file__).resolve().parents[2] / "train_files" / "data_registry" / "data_config.py"
+        spec = importlib.util.spec_from_file_location("libero_plus_data_config", config_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load LIBERO-plus data config from {config_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data_config = module.LiberoPlusRot6dDataConfig()
+        modality_configs = data_config_to_gr00t_modality_configs(data_config)
+        keys = [key.split(".", 1)[-1] for key in data_config.action_keys]
+        dims = [int(data_config.action_key_dims[key]) for key in data_config.action_keys]
+        grouped = _split_flat_action_stats(self.action_norm_stats, keys, dims)
+        action_configs = modality_configs["action"].action_configs or []
+        relative = {
+            key: grouped[key]
+            for key, action_config in zip(keys, action_configs)
+            if action_config.rep.name == "RELATIVE"
+        }
+        layout = load_layout(_CANONICAL_LAYOUT)
+        robot_maps = load_robot_maps(_CANONICAL_ROBOTS, layout)
+        processor = StarVLAPackProcessor(
+            modality_configs={_CANONICAL_ROBOT_TYPE: modality_configs},
+            include_state=False,
+            use_percentiles=bool(self.action_norm_stats.get("use_percentiles", True)),
+            clip_outliers=True,
+            use_relative_action=True,
+            canonical_layout=layout,
+            robot_maps=robot_maps,
+        )
+        processor.set_statistics(
+            {_CANONICAL_ROBOT_TYPE: {"action": grouped, "relative_action": relative}},
+            override=True,
+        )
+        self._canonical_processor = processor
+        return processor
+
+    def _canonical_absolute_targets(self, normalized_actions: np.ndarray, raw_right_eef) -> np.ndarray:
+        """90-d normalized chunk -> absolute xyz+rot6d and gripper, shape (chunk, 10).
+
+        Slots come from the canonical layout. OSC scaling happens on the client
+        against the live end-effector, not against this chunk-start pose.
+        """
+        current = np.asarray(raw_right_eef, dtype=np.float32).reshape(-1)
+        if current.shape[0] != 9:
+            raise ValueError(f"raw_right_eef must have length 9, got {current.shape}")
+        processor = self._canonical_decode_processor()
+        decoded = processor.decode_action(
+            np.asarray(normalized_actions, dtype=np.float32),
+            _CANONICAL_ROBOT_TYPE,
+            state={"right_eef": current[None, :]},
+        )
+        absolute_eef = np.asarray(decoded["right_eef"], dtype=np.float32)
+        gripper = np.asarray(decoded["right_gripper"], dtype=np.float32).reshape(-1, 1)
+        if absolute_eef.shape[-1] != 9:
+            raise ValueError(f"Expected absolute right_eef width 9, got {absolute_eef.shape}")
+        return np.concatenate([absolute_eef, gripper], axis=-1)
 
     def _relative_decode_processor(self) -> StarVLAPackProcessor:
         if self._relative_processor is not None:

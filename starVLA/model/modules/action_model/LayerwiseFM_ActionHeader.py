@@ -362,13 +362,44 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             loss = (squared_error * mask).sum() / mask.sum().clamp_min(1)
         return loss
 
+    @staticmethod
+    def _inference_action_mask(action_mask, actions):
+        """Validate a binary mask and expand it to the sampled (B, T, D) chunk.
+
+        A two-dimensional mask always means (B, D), never (T, D).
+        Per-timestep masks must explicitly include the batch dimension.
+        """
+        if action_mask is None:
+            return None
+        mask = torch.as_tensor(action_mask, device=actions.device)
+        batch_size, horizon, action_dim = actions.shape
+        if mask.ndim == 1 and mask.shape == (action_dim,):
+            mask = mask[None, None, :]
+        elif mask.ndim == 2 and mask.shape == (batch_size, action_dim):
+            mask = mask[:, None, :]
+        elif mask.ndim == 3 and mask.shape in (
+            (batch_size, 1, action_dim),
+            (batch_size, horizon, action_dim),
+        ):
+            pass
+        else:
+            raise ValueError(
+                f"action_mask shape {tuple(mask.shape)} must be (D,), (B,D), "
+                f"(B,1,D), or (B,T,D) for actions shape {tuple(actions.shape)}"
+            )
+        if not torch.all((mask == 0) | (mask == 1)):
+            raise ValueError("action_mask must contain only binary 0/1 values")
+        return mask.to(dtype=torch.bool).expand_as(actions)
+
     @torch.no_grad()
     def predict_action(
         self,
         vl_embs_list: list,
         state: torch.Tensor = None,
         encoder_attention_mask=None,
+        action_mask: torch.Tensor = None,
     ) -> torch.Tensor:
+        """Sample a chunk, keeping invalid action slots zero throughout integration."""
         # Set initial actions as the sampled noise.
         batch_size = vl_embs_list[0].shape[0]
         device = vl_embs_list[0].device
@@ -377,6 +408,9 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             dtype=vl_embs_list[0].dtype,
             device=device,
         )
+        mask = self._inference_action_mask(action_mask, actions)
+        if mask is not None:
+            actions = actions.masked_fill(~mask, 0)
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
@@ -418,9 +452,13 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             # Decode only the action-token positions.
             pred = self.action_decoder(model_output)
             pred_velocity = pred[:, -self.action_horizon :]
+            if mask is not None:
+                pred_velocity = pred_velocity.masked_fill(~mask, 0)
 
             # Euler integration
             actions = actions + dt * pred_velocity
+            if mask is not None:
+                actions = actions.masked_fill(~mask, 0)
         return actions
 
     def predict_action_realtime(
@@ -434,6 +472,7 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         prefix_attention_schedule: str = "exp",
         max_guidance_weight: float = 10.0,
         encoder_attention_mask=None,
+        action_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         """RTC-aware flow-matching inference.
 
@@ -457,6 +496,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             max_guidance_weight: ΠGDM only. Cap on the guidance weight.
             encoder_attention_mask: Optional mask for encoder/KV tokens in
                 every cross-attention block.
+            action_mask: Binary mask shaped (D,), (B,D), (B,1,D), or (B,T,D).
+                Inactive dimensions stay zero, including the previous prefix.
 
         Returns:
             actions: (B, action_horizon, action_dim) predicted actions.
@@ -466,6 +507,7 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
                 vl_embs_list,
                 state,
                 encoder_attention_mask=encoder_attention_mask,
+                action_mask=action_mask,
             )
 
         import math
@@ -493,6 +535,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         def _forward_velocity(actions, timesteps, state_features):
             """Single DiT forward pass returning predicted velocity."""
             B = actions.shape[0]
+            if mask is not None:
+                actions = actions.masked_fill(~mask, 0)
             action_features = self.action_encoder(actions, timesteps)
             if self.config.add_pos_embed:
                 pos_ids = torch.arange(action_features.shape[1], dtype=torch.long, device=device)
@@ -512,7 +556,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
                 return_pre_output=True,
             )
             pred = self.action_decoder(model_output)
-            return pred[:, -self.action_horizon :]
+            velocity = pred[:, -self.action_horizon :]
+            return velocity.masked_fill(~mask, 0) if mask is not None else velocity
 
         T_prev = prev_action_chunk.shape[1]
         if T_prev < self.action_horizon:
@@ -533,6 +578,10 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             dtype=dtype,
             device=device,
         )
+        mask = self._inference_action_mask(action_mask, actions)
+        if mask is not None:
+            actions = actions.masked_fill(~mask, 0)
+            prev_action_chunk = prev_action_chunk.masked_fill(~mask, 0)
 
         state_features = self.state_encoder(state) if state is not None else None
 
@@ -563,6 +612,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
                     x_t = actions.detach().requires_grad_(True)
                     v_t = _forward_velocity(x_t, timesteps_tensor, state_features)
                     x_1_hat = x_t + v_t * (1.0 - t_cont)
+                    if mask is not None:
+                        x_1_hat = x_1_hat.masked_fill(~mask, 0)
                     error = (prev - x_1_hat) * weights[None, :, None]
                     pinv_correction = torch.autograd.grad(
                         x_1_hat,
@@ -577,7 +628,11 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
                 gw = min(c * inv_r2, max_guidance_weight)
 
                 v_corrected = v_t.detach() + gw * pinv_correction.detach()
+                if mask is not None:
+                    v_corrected = v_corrected.masked_fill(~mask, 0)
                 actions = actions.detach() + dt * v_corrected
+                if mask is not None:
+                    actions = actions.masked_fill(~mask, 0)
 
             return actions
 
@@ -595,6 +650,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             for t_step in range(num_steps):
                 t_cont = t_step / float(num_steps)
                 actions = torch.where(prefix_mask, prev_action_chunk.to(dtype), actions)
+                if mask is not None:
+                    actions = actions.masked_fill(~mask, 0)
 
                 t_bucket = int(t_cont * self.num_timestep_buckets)
                 t_bucket_prefix = int(1.0 * self.num_timestep_buckets) - 1
@@ -641,8 +698,12 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
 
                 pred = self.action_decoder(model_output)
                 pred_velocity = pred[:, -self.action_horizon :]
+                if mask is not None:
+                    pred_velocity = pred_velocity.masked_fill(~mask, 0)
                 actions = actions + dt * pred_velocity
                 actions = torch.where(prefix_mask, prev_action_chunk.to(dtype), actions)
+                if mask is not None:
+                    actions = actions.masked_fill(~mask, 0)
 
             return actions
 

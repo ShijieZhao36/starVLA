@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 10-d QwenPI LIBERO-plus stage1 run (gr00t_sharded, xyz + rot6d + gripper).
-# Same training run as the 60k script; this evaluates the 30k checkpoint.
-# PolicyModel decodes that chunk to the 7-d OSC command before the sim worker.
+# 90-d canonical QwenPI LIBERO-plus stage1 run.
+# The server returns absolute right-eef targets. The client turns each one
+# into an OSC delta from the live end-effector. 10-d eval scripts are unchanged.
 # Trained with the interleaved DiT, so USE_CANONICAL_FORWARD must stay true.
 #
 # parallel_eval/ is five levels below the repo root:
@@ -13,13 +13,14 @@ export LIBERO_HOME="${LIBERO_HOME:-/root/workspace/LIBERO-plus}"
 LIBERO_PYTHON="${LIBERO_PYTHON:-python}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
-your_ckpt="${your_ckpt:-/mnt/zhaoshijie/checkpoints/starVLA/libero_plus_qwen3vl_pi_gr00t_60k/checkpoints/steps_30000_pytorch_model.pt}"
-output_dir="${output_dir:-${STARVLA_DIR}/results/libero_plus_qwen3vl_pi_gr00t_30k}"
+your_ckpt="${your_ckpt:-/mnt/zhaoshijie/checkpoints/starVLA/libero_plus_canonical_qwen3vl_pi_gr00t_60k_1029/checkpoints/steps_60000_pytorch_model.pt}"
+output_dir="${output_dir:-/mnt/zhaoshijie/eval/starVLA/libero_plus/libero_plus_canonical_qwen3vl_pi_gr00t_60k_1029_$(date +%Y%m%d_%H%M%S)}"
 USE_CANONICAL_FORWARD="${USE_CANONICAL_FORWARD:-true}"
+GRIPPER_OPEN_SIGN="${GRIPPER_OPEN_SIGN:-positive}"
 SIMS_PER_GPU="${SIMS_PER_GPU:-4}"
 NUM_GPUS="${NUM_GPUS:-8}"
-# 9883-9891 is the 60k eval. Keep 30k on a separate range so both can run together.
-BASE_PORT="${BASE_PORT:-9903}"
+# 9923-9931 is the 10-d 20261031 eval. Keep this 90-d run on a separate range.
+BASE_PORT="${BASE_PORT:-9943}"
 LAUNCH_STAGGER_SEC="${LAUNCH_STAGGER_SEC:-90}"
 NUM_TRIALS_PER_TASK="${NUM_TRIALS_PER_TASK:-1}"
 USE_BF16="${USE_BF16:-1}"
@@ -34,10 +35,16 @@ if [[ "${USE_CANONICAL_FORWARD}" != "true" && "${USE_CANONICAL_FORWARD}" != "fal
   echo "USE_CANONICAL_FORWARD must be 'true' or 'false'; got '${USE_CANONICAL_FORWARD}'." >&2
   exit 2
 fi
+if [[ "${GRIPPER_OPEN_SIGN}" != "positive" && "${GRIPPER_OPEN_SIGN}" != "negative" ]]; then
+  echo "GRIPPER_OPEN_SIGN must be 'positive' or 'negative'; got '${GRIPPER_OPEN_SIGN}'." >&2
+  exit 2
+fi
 
 echo "One policy server per GPU, ${SIMS_PER_GPU} sim workers per GPU, dynamic episode queue."
 echo "Checkpoint: ${your_ckpt}"
+echo "Output: ${output_dir}"
 echo "Applying config override: framework.action_model.diffusion_model_cfg.use_canonical_forward=${USE_CANONICAL_FORWARD}"
+echo "Gripper open sign: ${GRIPPER_OPEN_SIGN}"
 
 cmd=(
   "${LIBERO_PYTHON}"
@@ -45,6 +52,7 @@ cmd=(
   --pretrained-path "${your_ckpt}"
   --output-dir "${output_dir}"
   --use-canonical-forward "${USE_CANONICAL_FORWARD}"
+  --gripper-open-sign "${GRIPPER_OPEN_SIGN}"
   --sims-per-gpu "${SIMS_PER_GPU}"
   --num-gpus "${NUM_GPUS}"
   --base-port "${BASE_PORT}"

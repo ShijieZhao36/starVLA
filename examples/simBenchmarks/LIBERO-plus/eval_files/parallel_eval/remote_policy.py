@@ -6,8 +6,28 @@ second time. The unnormalized chunk is cached on this client.
 
 import cv2 as cv
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
+from gr00t.data.state_action.pose import EndEffectorPose
+
+_ROT6D_POSITION_SCALE_M = 0.05
+_ROT6D_ROTATION_SCALE_RAD = 0.5
+
+
+def osc_delta(target_eef: np.ndarray, live_eef: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """World xyz delta and world-frame rotvec, both in controller units.
+
+    OSC_POSE left-multiplies, so ``R_delta = R_target @ R_live.T``.
+    """
+    target = np.asarray(target_eef, dtype=np.float64).reshape(9)
+    live = np.asarray(live_eef, dtype=np.float64).reshape(9)
+    delta_xyz = (target[:3] - live[:3]) / _ROT6D_POSITION_SCALE_M
+    target_pose = EndEffectorPose(translation=target[:3], rotation=target[3:], rotation_type="rot6d")
+    live_pose = EndEffectorPose(translation=live[:3], rotation=live[3:], rotation_type="rot6d")
+    rotation_delta = target_pose.homogeneous[:3, :3] @ live_pose.homogeneous[:3, :3].T
+    rotvec = Rotation.from_matrix(rotation_delta).as_rotvec() / _ROT6D_ROTATION_SCALE_RAD
+    return delta_xyz.astype(np.float32), rotvec.astype(np.float32)
 
 
 class RemoteChunkPolicy:
@@ -45,10 +65,24 @@ class RemoteChunkPolicy:
         if self.raw_actions is None:
             raise RuntimeError("policy step requested an action before the first chunk")
 
-        raw_actions = self.raw_actions[step % self.action_chunk_size][None]
-        raw_action = {
-            "world_vector": np.array(raw_actions[0, :3]),
-            "rotation_delta": np.array(raw_actions[0, 3:6]),
-            "open_gripper": np.array(raw_actions[0, 6:7]),  # range [0, 1]; 1 = open; 0 = close
-        }
-        return {"raw_action": raw_action}
+        chunk = self.raw_actions[0] if self.raw_actions.ndim == 3 else self.raw_actions
+        row = chunk[step % self.action_chunk_size]
+        if row.shape[-1] == 7:
+            raw_action = {
+                "world_vector": np.array(row[:3]),
+                "rotation_delta": np.array(row[3:6]),
+                "open_gripper": np.array(row[6:7]),  # range [0, 1]; 1 = open; 0 = close
+            }
+            return {"raw_action": raw_action}
+        if row.shape[-1] == 10:
+            live = example.get("raw_right_eef")
+            if live is None:
+                raise RuntimeError("90-d absolute targets require raw_right_eef on every step")
+            delta_xyz, rotvec = osc_delta(row[:9], live)
+            raw_action = {
+                "world_vector": delta_xyz,
+                "rotation_delta": rotvec,
+                "open_gripper": np.array(row[9:10], dtype=np.float32),
+            }
+            return {"raw_action": raw_action}
+        raise RuntimeError(f"Unexpected action width {row.shape[-1]}; expected 7 or 10")

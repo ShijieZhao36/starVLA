@@ -173,6 +173,8 @@ class PolicyModel:
         return cv.resize(image, tuple(self.image_size), interpolation=cv.INTER_AREA)
 
     def _remember_chunk(self, example: dict, start_eef: np.ndarray) -> None:
+        example = dict(example)
+        example["robot_tag"] = _ROBOT_TYPE
         response = self.vla.predict_action(
             example,
             do_sample=False,

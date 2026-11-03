@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Tuple
 
 # Third-Party Libraries
-import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -44,6 +43,7 @@ from transformers import AutoProcessor, get_scheduler
 from starVLA.dataloader import build_dataloader
 from starVLA.model.framework.base_framework import build_framework
 from starVLA.model.framework.share_tools import apply_config_compat
+from starVLA.training.action_metrics import compute_action_metrics
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
 
@@ -374,20 +374,17 @@ class VLATrainer(TrainerUtils):
 
         self._finalize_training()
 
-    def eval_action_model(self, step_metrics: dict = None) -> float:
-        """Run simple action-eval on current batch and attach score to metrics."""
+    def eval_action_model(self, step_metrics: dict = None) -> dict:
+        """Attach normalized action MAE/MSE over valid elements of the batch."""
+        if step_metrics is None:
+            step_metrics = {}
         examples = self._get_next_batch()
-        actions = [example["action"] for example in examples]
         output_dict = self.accelerator.unwrap_model(self.model).predict_action(
             examples=examples, use_ddim=True, num_ddim_steps=20
         )
 
         if self.accelerator.is_main_process:
-            normalized_actions = output_dict["normalized_actions"]
-            actions = np.array(actions)
-            num_pots = np.prod(actions.shape)
-            score = TrainerUtils.euclidean_distance(normalized_actions, actions)
-            step_metrics["mse_score"] = score / num_pots
+            step_metrics.update(compute_action_metrics(output_dict["normalized_actions"], examples))
 
         del examples
         if dist.is_initialized():

@@ -15,6 +15,7 @@ import torch
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
+from starVLA.dataloader.canonical_layout import build_inference_action_mask, load_layout, load_robot_maps
 from starVLA.training.trainer_utils import initialize_overwatch
 
 logger = initialize_overwatch(__name__)
@@ -163,6 +164,22 @@ class Qwen_PI(baseframework):
         # are normalised upstream by `share_tools.apply_config_compat`, so we
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
+        self._action_mask_robot_maps = None
+        data_cfg = self.config.datasets.vla_data
+        if data_cfg.get("canonical_layout"):
+            layout = load_layout(data_cfg.canonical_layout)
+            if layout.dim != int(self.config.framework.action_model.action_dim):
+                raise ValueError("Canonical layout width must match the model action_dim")
+            self._action_mask_robot_maps = load_robot_maps(data_cfg.canonical_robots, layout)
+
+    def _inference_action_mask(self, examples, device, dtype):
+        mask = build_inference_action_mask(
+            examples,
+            self.action_horizon,
+            int(self.config.framework.action_model.action_dim),
+            self._action_mask_robot_maps,
+        )
+        return None if mask is None else torch.as_tensor(mask, device=device, dtype=dtype)
 
     def _encode_vl_hidden_states(
         self, batch_images: List, instructions: List[str]
@@ -302,10 +319,11 @@ class Qwen_PI(baseframework):
             if state is not None
             else None
         )
+        action_mask = self._inference_action_mask(examples, base_hidden.device, base_hidden.dtype)
         # Step 4: Action Expert Forward and Loss
         with torch.autocast("cuda", dtype=torch.float32):
             pred_actions = self.action_model.predict_action(
-                vl_embs_list, state, encoder_attention_mask=backbone_attention_mask
+                vl_embs_list, state, encoder_attention_mask=backbone_attention_mask, action_mask=action_mask
             )  # (B, chunk_len, action_dim)
 
         normalized_actions = pred_actions.detach().cpu().numpy()
@@ -365,6 +383,7 @@ class Qwen_PI(baseframework):
         prev_chunk_t = torch.from_numpy(np.array(prev_action_chunk_normalized)).to(
             base_hidden.device, dtype=torch.float32
         )
+        action_mask = self._inference_action_mask(examples, base_hidden.device, base_hidden.dtype)
 
         with torch.autocast("cuda", dtype=torch.float32):
             pred_actions = self.action_model.predict_action_realtime(
@@ -372,6 +391,7 @@ class Qwen_PI(baseframework):
                 state_t,
                 prev_action_chunk=prev_chunk_t,
                 inference_delay=inference_delay,
+                action_mask=action_mask,
                 **kwargs,
             )
 

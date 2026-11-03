@@ -175,6 +175,54 @@ def load_robot_maps(path: str | Path, layout: CanonicalLayout) -> dict[str, Robo
     return maps
 
 
+def build_inference_action_mask(
+    examples: list[dict],
+    action_horizon: int,
+    action_dim: int,
+    robot_maps: dict[str, RobotCanonicalMap] | None = None,
+) -> np.ndarray | None:
+    """Resolve a (B, T, D) inference mask from samples or canonical robot maps.
+
+    Training samples already carry an action_mask. Online canonical policies
+    identify their robot with robot_tag, so padding stays identical to training.
+    Non-canonical callers without masks retain the original unmasked behavior.
+    """
+    if robot_maps is None and not any("action_mask" in item for item in examples):
+        return None
+    masks = []
+    for item in examples:
+        if "action_mask" in item:
+            mask = np.asarray(item["action_mask"])
+            if mask.ndim == 1:
+                mask = mask[None, :]
+            if mask.ndim != 2 or mask.shape[-1] != action_dim:
+                raise ValueError(f"Expected action_mask (T, {action_dim}) or ({action_dim},), got {mask.shape}")
+            if mask.shape[0] == 1:
+                mask = np.broadcast_to(mask, (action_horizon, action_dim))
+            elif mask.shape[0] >= action_horizon:
+                mask = mask[-action_horizon:]
+            else:
+                raise ValueError(f"action_mask has {mask.shape[0]} steps, expected at least {action_horizon}")
+        elif robot_maps is not None:
+            tag = item.get("robot_tag")
+            if tag not in robot_maps:
+                raise ValueError(
+                    f"Canonical inference requires a known robot_tag or action_mask; "
+                    f"got robot_tag={tag!r}, available={sorted(robot_maps)}"
+                )
+            mask = np.zeros((action_horizon, action_dim), dtype=np.float32)
+            for placement in robot_maps[tag].action:
+                mask[:, placement.dest : placement.dest + placement.length] = 1
+        else:
+            raise ValueError("action_mask must be present on every sample in the inference batch")
+        if not np.all((mask == 0) | (mask == 1)):
+            raise ValueError("action_mask must contain only finite binary values")
+        if not np.all(np.any(mask, axis=-1)):
+            raise ValueError("action_mask must include at least one valid dimension per step")
+        masks.append(mask)
+    return np.asarray(masks, dtype=np.float32)
+
+
 def scatter(
     groups: dict[str, np.ndarray],
     placements: tuple[Placement, ...] | list[Placement],
