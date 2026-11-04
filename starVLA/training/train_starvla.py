@@ -474,6 +474,9 @@ def main(cfg) -> None:
     logger.info("✅ Configuration wrapped for access tracking")
 
     output_dir = setup_directories(cfg=cfg)
+    # Seed before model construction so fresh action-head weights are reproducible.
+    # All ranks start identically; prepare_training later seeds rank-local sampling.
+    set_seed(cfg.seed)
     vla = build_framework(cfg)
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)

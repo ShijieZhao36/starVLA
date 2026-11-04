@@ -1,0 +1,13 @@
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: DEEPSPEED
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+same_network: true
+rdzv_backend: static
+main_training_function: main
+use_cpu: false
+deepspeed_config:
+  deepspeed_config_file: examples/pretrain/LiberoPlus/train_files/deepspeed_libero_plus_ln_zero2.json
+  zero3_init_flag: false
