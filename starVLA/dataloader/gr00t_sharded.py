@@ -50,6 +50,7 @@ from starVLA.dataloader.gr00t_lerobot.registry import (
     DATASET_NAMED_MIXTURES,
     ROBOT_TYPE_CONFIG_MAP,
 )
+from starVLA.dataloader.gr00t_lerobot.mixtures import resolve_dataset_mixture
 from starVLA.dataloader.gr00t_sharded_processor import StarVLAPackProcessor, _tag_value
 
 logger = logging.getLogger(__name__)
@@ -84,11 +85,15 @@ class Gr00tShardedMixture(IterableDataset):
         mixture: ShardedMixtureDataset,
         processor: StarVLAPackProcessor,
         virtual_length: int,
+        sampling_manifest: dict | None = None,
+        audit_sampling: bool = False,
     ):
         super().__init__()
         self.mixture = mixture
         self.processor = processor
         self._virtual_length = max(int(virtual_length), 1)
+        self.sampling_manifest = sampling_manifest
+        self.audit_sampling = audit_sampling
 
     def __iter__(self):
         return iter(self.mixture)
@@ -113,6 +118,14 @@ class Gr00tShardedMixture(IterableDataset):
         with open(save_path, "w") as f:
             json.dump(_jsonify(payload), f, indent=2)
         logger.info("Saved dataset statistics file at path %s", save_path)
+        if self.audit_sampling:
+            self.save_sampling_manifest(save_path.parent / "data_sampling_manifest.json")
+
+    def save_sampling_manifest(self, save_path: Path | str) -> None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with save_path.open("w") as f:
+            json.dump(_jsonify(self.sampling_manifest), f, indent=2)
 
 
 def _jsonify(obj: Any) -> Any:
@@ -618,6 +631,73 @@ def _as_bool(value, default: bool = False) -> bool:
     return bool(value)
 
 
+def resolve_dataset_paths(data_cfg, dataset_name: str, robot_type: str):
+    """Optional per-robot roots; legacy single-root paths retain their meaning."""
+    roots = _cfg_get(data_cfg, "data_root_dirs_by_robot", {}) or {}
+    caches = _cfg_get(data_cfg, "frame_cache_dirs_by_robot", {}) or {}
+    root = roots.get(robot_type, _cfg_get(data_cfg, "data_root_dir", None))
+    cache = caches.get(robot_type, _cfg_get(data_cfg, "frame_cache_dir", None))
+    if root in (None, ""):
+        raise ValueError(f"No data root for robot_type={robot_type!r}, dataset={dataset_name!r}")
+    if isinstance(cache, str):
+        cache = cache.strip() or None
+    return Path(root) / dataset_name, _dataset_frame_cache_dir(cache, dataset_name)
+
+
+def validate_dataset_paths(dataset_path: Path, cache_path: Path | None, robot_type: str):
+    info = dataset_path / "meta" / "info.json"
+    if not info.is_file():
+        raise FileNotFoundError(f"Missing dataset metadata for robot_type={robot_type!r}: {info}")
+    if cache_path is not None and not cache_path.is_dir():
+        raise FileNotFoundError(f"Missing frame cache for robot_type={robot_type!r}: {cache_path}")
+
+
+def build_sampling_manifest(data_mix, entries, datasets, mixture):
+    """Record expected frame ratios and the realized initial shard schedule.
+
+    Planned frames are not consumed frames; training should log robot_tag counts
+    separately. The sampler divides requested weights by average shard length.
+    """
+    weights = np.asarray(mixture.weights, dtype=np.float64)
+    lengths = [np.asarray(ds.shard_lengths, dtype=np.int64) for ds in datasets]
+    average_lengths = np.asarray([values.mean() for values in lengths])
+    shard_probabilities = weights / average_lengths
+    shard_probabilities /= shard_probabilities.sum()
+    planned_shards = np.zeros(len(datasets), dtype=np.int64)
+    planned_frames = np.zeros(len(datasets), dtype=np.int64)
+    for dataset_index, shard_index in mixture.shard_sampling_schedule:
+        planned_shards[dataset_index] += 1
+        planned_frames[dataset_index] += lengths[dataset_index][shard_index]
+    total_planned_frames = max(int(planned_frames.sum()), 1)
+    rows, by_robot = [], {}
+    for index, (name, weight, robot_type, dataset_path, cache_path) in enumerate(entries):
+        row = {
+            "dataset_name": name, "robot_type": robot_type,
+            "dataset_path": str(dataset_path),
+            "frame_cache_path": None if cache_path is None else str(cache_path),
+            "sampling_weight": float(weight),
+            "expected_frame_fraction": float(weights[index] / weights.sum()),
+            "average_shard_length": float(average_lengths[index]),
+            "shard_sampling_probability": float(shard_probabilities[index]),
+            "planned_shards": int(planned_shards[index]),
+            "planned_frames": int(planned_frames[index]),
+        }
+        rows.append(row)
+        summary = by_robot.setdefault(robot_type, {"datasets": 0, "expected_frame_fraction": 0.0, "planned_frames": 0})
+        summary["datasets"] += 1
+        summary["expected_frame_fraction"] += row["expected_frame_fraction"]
+        summary["planned_frames"] += row["planned_frames"]
+    for summary in by_robot.values():
+        summary["planned_frame_fraction"] = summary["planned_frames"] / total_planned_frames
+    return {
+        "data_mix": data_mix, "seed": mixture.seed, "epoch": mixture.epoch,
+        "schedule_scope": "initial complete shard schedule, not consumed training samples",
+        "statistics_grouping": "embodiment tag (robot_type with canonical layout)",
+        "loss_reduction": "unchanged local-batch mean over valid action elements",
+        "by_robot": by_robot, "datasets": rows,
+    }
+
+
 def get_vla_dataset(
     data_cfg,
     mode: str = "train",
@@ -632,9 +712,8 @@ def get_vla_dataset(
     if modality_config_path:
         load_modality_config_path(str(modality_config_path))
 
-    data_root_dir = Path(_cfg_get(data_cfg, "data_root_dir"))
     data_mix = _cfg_get(data_cfg, "data_mix")
-    mixture_spec = DATASET_NAMED_MIXTURES[data_mix]
+    mixture_spec = resolve_dataset_mixture(data_mix, DATASET_NAMED_MIXTURES)
     logger.info(
         "[gr00t_sharded] Using mixture '%s': %s",
         data_mix,
@@ -676,18 +755,24 @@ def get_vla_dataset(
     included = set()
     filtered = []
     for d_name, d_weight, robot_type in mixture_spec:
+        if not np.isfinite(d_weight) or d_weight < 0:
+            raise ValueError(f"Dataset {d_name!r} has invalid sampling weight {d_weight!r}")
         dataset_key = (d_name, robot_type)
         if dataset_key in included:
             logger.warning("Skipping Duplicate Dataset: %s", (d_name, d_weight, robot_type))
             continue
         included.add(dataset_key)
-        filtered.append((d_name, d_weight, robot_type))
+        dataset_path, cache_path = resolve_dataset_paths(data_cfg, d_name, robot_type)
+        validate_dataset_paths(dataset_path, cache_path, robot_type)
+        filtered.append((d_name, d_weight, robot_type, dataset_path, cache_path))
+    if not filtered or sum(entry[1] for entry in filtered) <= 0:
+        raise ValueError(f"Mixture {data_mix!r} needs a positive total sampling weight")
 
     datasets = []
     weights = []
     processor_modality_configs: dict[str, dict[str, Gr00tModalityConfig]] = {}
 
-    for d_name, d_weight, robot_type in filtered:
+    for d_name, d_weight, robot_type, dataset_path, cache_path in filtered:
         if robot_type not in ROBOT_TYPE_CONFIG_MAP:
             raise KeyError(
                 f"Unknown robot_type={robot_type!r} for dataset {d_name!r}. "
@@ -713,7 +798,6 @@ def get_vla_dataset(
             tag = stats_tag_for(data_config, robot_type)
         if tag not in processor_modality_configs:
             processor_modality_configs[tag] = modality_configs
-        dataset_path = data_root_dir / d_name
         with run_or_wait_on_rank0(label=f"generate_stats({dataset_path})") as is_rank0:
             if is_rank0:
                 generate_stats(dataset_path)
@@ -727,7 +811,7 @@ def get_vla_dataset(
             episode_sampling_rate=episode_sampling_rate,
             seed=seed,
             allow_padding=allow_padding,
-            frame_cache_dir=_dataset_frame_cache_dir(frame_cache_root, d_name),
+            frame_cache_dir=cache_path,
         )
         datasets.append(dataset)
         weights.append(float(d_weight))
@@ -753,8 +837,16 @@ def get_vla_dataset(
     total_steps = 0
     for dataset in datasets:
         total_steps += int(np.sum(dataset.shard_lengths))
-    return Gr00tShardedMixture(
+    result = Gr00tShardedMixture(
         mixture=mixture,
         processor=processor,
         virtual_length=max(total_steps, 1),
+        sampling_manifest=build_sampling_manifest(data_mix, filtered, datasets, mixture),
+        audit_sampling=_as_bool(_cfg_get(data_cfg, "audit_sampling", False)),
     )
+    manifest_path = _cfg_get(data_cfg, "sampling_manifest_path", None)
+    if manifest_path:
+        with run_or_wait_on_rank0(label=f"save_sampling_manifest({manifest_path})") as is_rank0:
+            if is_rank0:
+                result.save_sampling_manifest(manifest_path)
+    return result

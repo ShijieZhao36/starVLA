@@ -44,6 +44,7 @@ from starVLA.dataloader import build_dataloader
 from starVLA.model.framework.base_framework import build_framework
 from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.action_metrics import compute_action_metrics
+from starVLA.training.training_audit import SourceExposureAudit, model_parameter_identity
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
 
@@ -83,6 +84,37 @@ def prepare_data(cfg, accelerator, output_dir) -> DataLoader:
     if dist.is_initialized():
         dist.barrier()
     return vla_train_dataloader
+
+
+def audit_model_identity(model, cfg, output_dir, phase="initial"):
+    """Rank-0 parameter provenance, with synchronized error handling on all ranks."""
+    if not getattr(cfg.trainer, "audit_initial_model", False):
+        return
+    error = [None]
+    if accelerator.is_main_process:
+        try:
+            identity = model_parameter_identity(model)
+            identity.update({
+                "phase": phase,
+                "seed": int(cfg.seed),
+                "configured_base_vlm": cfg.framework.qwenvl.get("base_vlm", None),
+                "configured_pretrained_checkpoint": getattr(cfg.trainer, "pretrained_checkpoint", None),
+            })
+            # The initial audit precedes any trainer checkpoint override. A second
+            # training_start audit below captures overridden/resumed parameters.
+            expected = getattr(cfg.trainer, "expected_initial_model_sha256", None)
+            actual = identity["parameters"]["model"]["sha256"]
+            path = Path(output_dir) / f"{phase}_model_sha256.json"
+            path.write_text(json.dumps(identity, indent=2, sort_keys=True, default=str) + "\n")
+            if phase == "initial" and expected and actual != expected:
+                raise ValueError(f"Initial model SHA256 mismatch: expected {expected}, got {actual}")
+            logger.info(f"Model identity saved at {path}; SHA256={actual}")
+        except Exception as exc:
+            error[0] = f"Model identity audit failed: {type(exc).__name__}: {exc}"
+    if dist.is_initialized():
+        dist.broadcast_object_list(error, src=0)
+    if error[0] is not None:
+        raise RuntimeError(error[0])
 
 
 def setup_optimizer_and_scheduler(model, cfg) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
@@ -125,6 +157,9 @@ class VLATrainer(TrainerUtils):
 
         self.completed_steps = 0
         self.total_batch_size = self._calculate_total_batch_size()
+        self.source_exposure_audit = (
+            SourceExposureAudit() if getattr(cfg.trainer, "audit_source_exposure", False) else None
+        )
 
     def prepare_training(self):
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -137,6 +172,9 @@ class VLATrainer(TrainerUtils):
         self._save_initial_configs()
 
         self._init_checkpointing()
+        self.source_exposure_start_step = self.completed_steps
+        if self.resume_from_checkpoint:
+            audit_model_identity(self.model, self.config, self.config.output_dir, phase="training_start")
         self._adjust_lr_scheduler_for_resume()
 
         freeze_modules = (
@@ -305,7 +343,18 @@ class VLATrainer(TrainerUtils):
     def _log_metrics(self, metrics):
         """Record training metrics."""
         rank = dist.get_rank() if dist.is_initialized() else 0
-        if self.completed_steps % self.config.trainer.logging_frequency == 0 and rank == 0:
+        should_log = self.completed_steps % self.config.trainer.logging_frequency == 0
+        if self.source_exposure_audit is not None:
+            # This branch executes on ALL ranks, before rank-0-only output. Do not
+            # emit repeated step records during gradient accumulation. Flush the
+            # final partial window even when max_train_steps is not a log multiple.
+            should_log = self.accelerator.sync_gradients and self.completed_steps > 0 and (
+                should_log or self.completed_steps == self.config.trainer.max_train_steps
+            )
+            if should_log:
+                metrics.update(self.source_exposure_audit.global_metrics(self.accelerator.device))
+                metrics["source_exposure/start_step"] = self.source_exposure_start_step
+        if should_log and rank == 0:
             last_lrs = self.lr_scheduler.get_last_lr()
             for i, group in enumerate(self.optimizer.param_groups):
                 group_name = group.get("name", str(i))
@@ -315,6 +364,10 @@ class VLATrainer(TrainerUtils):
             except TypeError:
                 dataloader_length = max(int(self.config.trainer.max_train_steps), 1)
             metrics["epoch"] = round(self.completed_steps / dataloader_length, 2)
+            if self.source_exposure_audit is not None:
+                record = {"step": self.completed_steps, **metrics}
+                with open(Path(self.config.output_dir) / "metrics.jsonl", "a") as stream:
+                    stream.write(json.dumps(record, sort_keys=True) + "\n")
             if getattr(self, "_wandb_enabled", False):
                 try:
                     wandb.log(metrics, step=self.completed_steps)
@@ -424,6 +477,10 @@ class VLATrainer(TrainerUtils):
                 total_loss = action_loss
 
             self.accelerator.backward(total_loss)
+            if self.source_exposure_audit is not None:
+                # eval_action_model fetches separate examples without passing this
+                # point. Count each backward microbatch, including accumulation.
+                self.source_exposure_audit.observe_backward_batch(batch_vla)
 
             if self.config.trainer.gradient_clipping is not None:
                 self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.trainer.gradient_clipping)
@@ -478,6 +535,7 @@ def main(cfg) -> None:
     # All ranks start identically; prepare_training later seeds rank-local sampling.
     set_seed(cfg.seed)
     vla = build_framework(cfg)
+    audit_model_identity(vla, cfg, output_dir)
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)
 
@@ -496,6 +554,12 @@ def main(cfg) -> None:
     logger.info("... and that's all, folks!")
     if dist.is_initialized():
         dist.barrier()
+        if accelerator.device.type == "cuda":
+            # NCCL teardown can need temporary CUDA memory after the final save.
+            # Select this rank's device and release only unused allocator cache.
+            torch.cuda.set_device(accelerator.device)
+            torch.cuda.synchronize(accelerator.device)
+            torch.cuda.empty_cache()
         dist.destroy_process_group()
 
 

@@ -6,6 +6,34 @@ a float "sampling weight"
 """
 
 from typing import Dict, List, Tuple
+import math
+
+
+# Compose after the benchmark registry has been discovered: keep one authoritative
+# Galaxea subset list and retain each source's within-source sampling ratios.
+COMPOSED_DATASET_MIXTURES = {
+    "galaxea_libero_plus_stage1_80_20": [
+        ("galaxea_open_world_stage1", 0.8),
+        ("libero_plus_stage1", 0.2),
+    ],
+}
+
+
+def resolve_dataset_mixture(name, registry):
+    if name not in COMPOSED_DATASET_MIXTURES:
+        return list(registry[name])
+    resolved = []
+    for source, fraction in COMPOSED_DATASET_MIXTURES[name]:
+        entries = registry[source]
+        weights = [float(entry[1]) for entry in entries]
+        if not weights or any(not math.isfinite(w) or w <= 0 for w in weights):
+            raise ValueError(f"Mixture source {source!r} requires positive finite weights")
+        total = sum(weights)
+        resolved.extend(
+            (dataset_name, fraction * weight / total, robot_type)
+            for (dataset_name, _, robot_type), weight in zip(entries, weights)
+        )
+    return resolved
 
 
 # Dataset mixture name mapped to a list of tuples containing:
