@@ -19,6 +19,7 @@ framework:
     # state encoder is built and not called.
     state_dim: 90
     action_horizon: 8
+    decoder_input_norm: true
 
 datasets:
   vla_data:
