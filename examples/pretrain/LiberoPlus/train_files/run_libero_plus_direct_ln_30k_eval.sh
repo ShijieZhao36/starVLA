@@ -117,6 +117,11 @@ printf 'start_time=%s\nrun_id=%s\npython=%s\neval_python=%s\nenv_overlay=%s\nwan
 # Fail before committing to a long run if either environment cannot import.
 "$PYTHON_BIN" -c 'import torch, deepspeed, transformers; assert torch.cuda.device_count() == 8; print("Training imports and 8 GPUs OK (Qwen3 uses SDPA)")'
 "$EVAL_PYTHON" -c 'import mujoco, robosuite, pandas; from libero.libero import benchmark; print("Simulation imports OK")'
+"$EVAL_PYTHON" "$REPO_DIR/examples/pretrain/LiberoPlus/eval_files/eval_libero_model.py" --help > "$OUTPUT_DIR/launch/eval_cli_help.txt"
+"$EVAL_PYTHON" "$REPO_DIR/examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/run_queue_eval.py" --help > "$OUTPUT_DIR/launch/queue_cli_help.txt"
+if [[ -f "$ENV_OVERLAY/../sim_overlay_manifest.json" ]]; then
+  cp "$ENV_OVERLAY/../sim_overlay_manifest.json" "$OUTPUT_DIR/launch/"
+fi
 phase=training
 printf 'time=%s phase=training\n' "$(TZ=Asia/Shanghai date --iso-8601=seconds)" >> "$OUTPUT_DIR/pipeline_status.txt"
 "${train_cmd[@]}" 2>&1 | tee "$OUTPUT_DIR/train.log"
