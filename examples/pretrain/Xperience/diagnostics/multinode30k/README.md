@@ -14,7 +14,11 @@ decoder-input-LayerNorm patch and the gr00t self-sharded-dataloader fix.
   in the DeepSpeed JSON; do not duplicate `mixed_precision` in the Accelerate
   YAML when using this external DeepSpeed configuration.
 - Per-device batch 8, gradient accumulation 1, global batch 128.
-- 30,000 optimizer updates; 2,500 warmup updates; cosine decay to 1e-6.
+- 30,000 optimizer updates; 2,500 warmup updates; cosine scheduler configured
+  with `min_lr=1e-6`. The installed Transformers implementation computes a
+  shared minimum LR ratio against the optimizer's base LR:
+  `1e-6 / 2.5e-5 = 0.04`. Consequently, the actual final action-head LR is
+  `4e-6`, and the final Qwen3-VL LR is `4e-7`.
 - Action-head learning rate 1e-4; Qwen3-VL learning rate 1e-5.
 - Original Qwen3-VL-4B-Instruct weights; entire action head newly initialized.
 - Decoder input LN enabled; VLM and action head both train (`freeze_modules: ''`).
