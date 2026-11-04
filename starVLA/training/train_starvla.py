@@ -147,12 +147,25 @@ class VLATrainer(TrainerUtils):
         self.model = self.freeze_backbones(self.model, freeze_modules=freeze_modules)
         self.print_trainable_parameters(self.model)
 
-        self.model, self.optimizer, self.vla_train_dataloader = self.setup_distributed_training(
-            self.accelerator,
-            self.model,
-            self.optimizer,
-            self.vla_train_dataloader,
-        )
+        if self.config.datasets.vla_data.dataset_py == "gr00t_sharded":
+            # GR00T already partitions shards by global rank and worker.
+            # Preparing its loader again would discard (world_size - 1) /
+            # world_size of each rank's processed samples. Set the micro-batch
+            # explicitly because DeepSpeed cannot infer it without a loader.
+            ds_config = self.accelerator.state.deepspeed_plugin.deepspeed_config
+            ds_config["train_micro_batch_size_per_gpu"] = int(
+                self.config.datasets.vla_data.per_device_batch_size
+            )
+            self.model, self.optimizer = self.setup_distributed_training(
+                self.accelerator, self.model, self.optimizer
+            )
+        else:
+            self.model, self.optimizer, self.vla_train_dataloader = self.setup_distributed_training(
+                self.accelerator,
+                self.model,
+                self.optimizer,
+                self.vla_train_dataloader,
+            )
 
         self._init_wandb()
 

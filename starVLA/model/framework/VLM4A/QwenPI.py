@@ -326,7 +326,7 @@ class Qwen_PI(baseframework):
                 vl_embs_list, state, encoder_attention_mask=backbone_attention_mask, action_mask=action_mask
             )  # (B, chunk_len, action_dim)
 
-        normalized_actions = pred_actions.detach().cpu().numpy()
+        normalized_actions = pred_actions.detach().float().cpu().numpy()
         return {"normalized_actions": normalized_actions}
 
     @torch.inference_mode()
