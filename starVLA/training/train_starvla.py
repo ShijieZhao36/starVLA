@@ -288,7 +288,12 @@ class VLATrainer(TrainerUtils):
 
         if pretrained_checkpoint:
             reload_modules = getattr(self.config.trainer, "reload_modules", None)
-            self.model = self.load_pretrained_backbones(self.model, pretrained_checkpoint, reload_modules=reload_modules)
+            self.model = self.load_pretrained_backbones(
+                self.model,
+                pretrained_checkpoint,
+                reload_modules=reload_modules,
+                strict=getattr(self.config.trainer, "strict_pretrained_load", False),
+            )
             self.completed_steps = 0
             self.resume_from_checkpoint = pretrained_checkpoint
             logger.info(f"Loaded pretrained checkpoint: {pretrained_checkpoint}, steps: {self.completed_steps}")

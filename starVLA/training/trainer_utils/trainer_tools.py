@@ -250,15 +250,18 @@ class TrainerUtils:
         return num_params, num_trainable_params
 
     @staticmethod
-    def load_pretrained_backbones(model, checkpoint_path=None, reload_modules=None):
+    def load_pretrained_backbones(model, checkpoint_path=None, reload_modules=None, strict=False):
         """
         load checkpoint:
         - if reload_modules is set, load by path part
         - otherwise → load the entire model parameters (overwrite model)
+        - strict=True requires a full checkpoint with matching keys and shapes
 
         return:
             replace, loaded_modules: list of module paths that successfully loaded parameters; if global load, then ["<full_model>"]
         """
+        if strict and reload_modules:
+            raise ValueError("strict pretrained loading requires reload_modules to be empty")
         if not checkpoint_path:
             return []
         if _dist_rank() == 0:
@@ -296,7 +299,7 @@ class TrainerUtils:
                     print(f"❌ cannot find module path: {path}")
         else:  # full load
             try:
-                model.load_state_dict(checkpoint, strict=False)
+                model.load_state_dict(checkpoint, strict=strict)
                 if _dist_rank() == 0:
                     print("✅ loaded <full_model> model parameters")
                 loaded_modules = ["<full_model>"]
