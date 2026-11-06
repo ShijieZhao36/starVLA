@@ -5,8 +5,12 @@ set -Eeuo pipefail
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 positive_int() { [[ "$2" =~ ^[1-9][0-9]*$ ]] || die "$1 must be a positive integer"; }
 : "${ARM:?Set ARM to control or mixed}"
-: "${PRETRAIN_RUN_DIR:?Set this arm's completed 80k run directory}"
-: "${PAIRED_PRETRAIN_RUN_DIR:?Set the other arm's completed 80k run directory}"
+: "${PRETRAIN_RUN_DIR:?Set the completed 80k run directory for this arm}"
+REQUIRE_PAIRED_SOURCE="${REQUIRE_PAIRED_SOURCE:-1}"
+[[ "$REQUIRE_PAIRED_SOURCE" =~ ^[01]$ ]] || die 'REQUIRE_PAIRED_SOURCE must be 0 or 1'
+if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then
+  : "${PAIRED_PRETRAIN_RUN_DIR:?Set the completed 80k run directory for the other arm}"
+fi
 [[ "$ARM" == control || "$ARM" == mixed ]] || die 'ARM must be control or mixed'
 REPO_DIR="${REPO_DIR:-/mnt/zhaoshijie/workspace/starVLA_galaxea_libero_posttrain60k_20261105}"
 PYTHON_BIN="${PYTHON_BIN:-/root/miniconda3/envs/CRA/bin/python}"
@@ -18,14 +22,18 @@ PAIR_PROTOCOL_DIR="${PAIR_PROTOCOL_DIR:-$RUN_ROOT_DIR/launcher_logs/galaxea_libe
 DRY_RUN="${DRY_RUN:-1}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
 for flag in DRY_RUN SMOKE_TEST; do [[ "${!flag}" =~ ^[01]$ ]] || die "$flag must be 0 or 1"; done
-for path in "$REPO_DIR" "$PRETRAIN_RUN_DIR" "$PAIRED_PRETRAIN_RUN_DIR" "$RUN_ROOT_DIR" "$PAIR_PROTOCOL_DIR"; do
+for path in "$REPO_DIR" "$PRETRAIN_RUN_DIR" "$RUN_ROOT_DIR" "$PAIR_PROTOCOL_DIR"; do
   [[ "$path" == /* ]] || die "Path must be absolute: $path"
 done
 [[ -x "$PYTHON_BIN" && -x "$EVAL_PYTHON" ]] || die 'Missing Python interpreter'
 PRETRAIN_RUN_DIR="$(readlink -m "$PRETRAIN_RUN_DIR")"
-PAIRED_PRETRAIN_RUN_DIR="$(readlink -m "$PAIRED_PRETRAIN_RUN_DIR")"
 PRETRAIN_LAUNCHER_DIR="${PRETRAIN_LAUNCHER_DIR:-$(dirname "$PRETRAIN_RUN_DIR")/launcher_logs/$(basename "$PRETRAIN_RUN_DIR")}"
-PAIRED_PRETRAIN_LAUNCHER_DIR="${PAIRED_PRETRAIN_LAUNCHER_DIR:-$(dirname "$PAIRED_PRETRAIN_RUN_DIR")/launcher_logs/$(basename "$PAIRED_PRETRAIN_RUN_DIR")}"
+# Independent starts must not inspect the other source, even through symlinks.
+if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then
+  [[ "$PAIRED_PRETRAIN_RUN_DIR" == /* ]] || die 'Peer path must be absolute'
+  PAIRED_PRETRAIN_RUN_DIR="$(readlink -m "$PAIRED_PRETRAIN_RUN_DIR")"
+  PAIRED_PRETRAIN_LAUNCHER_DIR="${PAIRED_PRETRAIN_LAUNCHER_DIR:-$(dirname "$PAIRED_PRETRAIN_RUN_DIR")/launcher_logs/$(basename "$PAIRED_PRETRAIN_RUN_DIR")}"
+fi
 prefix="libero_plus_${ARM}_ln_8gpu_60k"
 MAX_TRAIN_STEPS=60000 WARMUP_STEPS=5000 SAVE_INTERVAL=10000 LOG_INTERVAL=100
 if [[ "$SMOKE_TEST" == 1 ]]; then
@@ -85,17 +93,22 @@ train_cmd=(
   --run_root_dir "$RUN_ROOT_DIR" --run_id "$RUN_ID"
 )
 gate_args=(
-  --arm "$ARM" --source "$PRETRAIN_RUN_DIR" --peer "$PAIRED_PRETRAIN_RUN_DIR"
-  --source-launcher "$PRETRAIN_LAUNCHER_DIR" --peer-launcher "$PAIRED_PRETRAIN_LAUNCHER_DIR"
+  --arm "$ARM" --source "$PRETRAIN_RUN_DIR" --source-launcher "$PRETRAIN_LAUNCHER_DIR"
   --output "$OUTPUT_DIR" --repo "$REPO_DIR" --config "$CONFIG_YAML" --runner "$SCRIPT_PATH"
   --accelerate "$ACCELERATE_CONFIG" --deepspeed "$DEEPSPEED_CONFIG" --overlay "$ENV_OVERLAY"
   --data "$DATA_ROOT/dataset_absolute" --cache "$FRAME_CACHE" --contract "$PAIR_PROTOCOL_DIR"
 )
+if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then
+  gate_args+=(--peer "$PAIRED_PRETRAIN_RUN_DIR" --peer-launcher "$PAIRED_PRETRAIN_LAUNCHER_DIR")
+else
+  gate_args+=(--independent-start)
+fi
 [[ "$SMOKE_TEST" == 0 ]] || gate_args+=(--smoke)
 report_args=()
 [[ -z "${CPU_PREFLIGHT_REPORT:-}" ]] || report_args=(--report "$CPU_PREFLIGHT_REPORT")
-printf 'Host=%s arm=%s run=%s dry_run=%s smoke=%s global_batch=64\n' "$(hostname)" "$ARM" "$RUN_ID" "$DRY_RUN" "$SMOKE_TEST"
-printf 'Source=%s\nPeer=%s\nOutput=%s\nEval=%s\n' "$PRETRAIN_RUN_DIR" "$PAIRED_PRETRAIN_RUN_DIR" "$OUTPUT_DIR" "$EVAL_OUTPUT_DIR"
+printf 'Host=%s arm=%s run=%s dry_run=%s smoke=%s require_paired_source=%s global_batch=64\n' "$(hostname)" "$ARM" "$RUN_ID" "$DRY_RUN" "$SMOKE_TEST" "$REQUIRE_PAIRED_SOURCE"
+printf 'Source=%s\nOutput=%s\nEval=%s\n' "$PRETRAIN_RUN_DIR" "$OUTPUT_DIR" "$EVAL_OUTPUT_DIR"
+if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then printf 'Peer=%s\n' "$PAIRED_PRETRAIN_RUN_DIR"; fi
 printf 'Training command: '; printf '%q ' "${train_cmd[@]}"; printf '\n'
 printf 'Evaluation: fixed final-%s checkpoint, 8 GPUs x 4 sims, env seed 7, 10030 episodes (smoke: 1).\n' "$MAX_TRAIN_STEPS"
 if [[ "$DRY_RUN" == 1 ]]; then
@@ -134,8 +147,9 @@ git status --short > "$OUTPUT_DIR/launch/git_status.txt"
 git diff --binary HEAD > "$OUTPUT_DIR/launch/tracked_changes.patch"
 printf '%q ' "${train_cmd[@]}" > "$OUTPUT_DIR/launch/train_command.txt"
 printf '\n' >> "$OUTPUT_DIR/launch/train_command.txt"
-printf 'start_time=%s\nhost=%s\narm=%s\npython=%s\neval_python=%s\nsource=%s\npeer=%s\nsmoke=%s\n' \
-  "$(TZ=Asia/Shanghai date --iso-8601=seconds)" "$(hostname)" "$ARM" "$PYTHON_BIN" "$EVAL_PYTHON" "$PRETRAIN_RUN_DIR" "$PAIRED_PRETRAIN_RUN_DIR" "$SMOKE_TEST" > "$OUTPUT_DIR/launch/experiment.txt"
+printf 'start_time=%s\nhost=%s\narm=%s\npython=%s\neval_python=%s\nsource=%s\nrequire_paired_source=%s\nsmoke=%s\n' \
+  "$(TZ=Asia/Shanghai date --iso-8601=seconds)" "$(hostname)" "$ARM" "$PYTHON_BIN" "$EVAL_PYTHON" "$PRETRAIN_RUN_DIR" "$REQUIRE_PAIRED_SOURCE" "$SMOKE_TEST" > "$OUTPUT_DIR/launch/experiment.txt"
+if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then printf 'peer=%s\n' "$PAIRED_PRETRAIN_RUN_DIR" >> "$OUTPUT_DIR/launch/experiment.txt"; fi
 export NUMBA_CACHE_DIR="$OUTPUT_DIR/runtime_cache/numba"
 CUDA_VISIBLE_DEVICES='' "$PYTHON_BIN" "$VALIDATOR" preflight "${gate_args[@]}" "${report_args[@]}"
 CUDA_VISIBLE_DEVICES='' "$EVAL_PYTHON" "$VALIDATOR" eval-protocol \

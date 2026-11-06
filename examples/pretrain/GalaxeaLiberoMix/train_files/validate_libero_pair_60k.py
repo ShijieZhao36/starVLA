@@ -112,15 +112,20 @@ def pinned_contract(path, value, create):
 
 def preflight(args):
     peer_arm = "mixed" if args.arm == "control" else "control"
+    independent = args.independent_start
+    selected_sources = [(args.arm, args.source, args.source_launcher)]
+    if not independent:
+        require(args.peer and args.peer_launcher, "Paired start requires --peer and --peer-launcher")
+        require(Path(args.source).resolve() != Path(args.peer).resolve(), "Source runs must differ")
+        selected_sources.append((peer_arm, args.peer, args.peer_launcher))
     sources, readiness_errors = {}, []
-    for arm, run, launcher in ((args.arm, args.source, args.source_launcher), (peer_arm, args.peer, args.peer_launcher)):
+    for arm, run, launcher in selected_sources:
         try:
             sources[arm] = validate_source(run, arm, launcher)
         except Exception as exc:
             if not args.dry_run:
                 raise
             readiness_errors.append(f"{arm}: {exc}")
-    require(Path(args.source).resolve() != Path(args.peer).resolve(), "Source runs must differ")
     cfg = load_yaml(args.config)
     assert_architecture(cfg)
     require(cfg["trainer"]["max_train_steps"] == 60000, "Common YAML must specify 60000 steps")
@@ -143,8 +148,10 @@ def preflight(args):
     code_paths += [str(p.relative_to(repo)) for p in sorted(eval_dir.glob("*.py"))]
     code_paths += [str(p.relative_to(repo)) for p in sorted(eval_dir.glob("run_libero_plus_canonical*8gpu.sh"))]
     protocol = {
-        "protocol": "galaxea-libero-paired-posttrain60k-v1", "smoke": args.smoke,
-        "sources": sources, "training_data": manifest,
+        # The common contract is identical even when the arms start at different
+        # times. Source provenance is pinned separately below for each arm.
+        "protocol": "galaxea-libero-paired-posttrain60k-v2", "smoke": args.smoke,
+        "training_data": manifest,
         "common_config": cfg, "frame_cache": str(Path(args.cache).resolve(strict=True)),
         "repo_commit": subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip(),
         "code_sha256": {name: digest(repo / name) for name in code_paths},
@@ -157,12 +164,13 @@ def preflight(args):
                  "canonical_forward": True, "bf16": True, "gripper_open_sign": "positive"},
     }
     if args.report:
-        common = {key: value for key, value in protocol.items() if key != "sources"}
         report = {"status": "training_preflight_passed", "ready": not readiness_errors,
                   "source_gate_errors": readiness_errors, "arm": args.arm,
-                  "pretrain_run_dir": str(Path(args.source).resolve()), "paired_pretrain_run_dir": str(Path(args.peer).resolve()),
+                  "pretrain_run_dir": str(Path(args.source).resolve()),
+                  "paired_pretrain_run_dir": None if independent else str(Path(args.peer).resolve()),
+                  "source_gate_scope": "self_only" if independent else "paired",
                   "repo_commit": protocol["repo_commit"],
-                  "common_protocol_sha256": hashlib.sha256(json.dumps(common, sort_keys=True).encode()).hexdigest(),
+                  "common_protocol_sha256": hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest(),
                   "configuration_sha256": digest(args.config), "training_data": manifest}
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         Path(args.report).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -172,13 +180,17 @@ def preflight(args):
             print(error)
         print("Common configuration/data/code checks passed; source success gates remain pending.")
         return
-    pinned_contract(Path(args.contract) / "protocol_manifest.json", protocol, not (args.dry_run or args.check_only))
+    create = not (args.dry_run or args.check_only)
+    pinned_contract(Path(args.contract) / "protocol_manifest.json", protocol, create)
+    for arm, provenance in sources.items():
+        pinned_contract(Path(args.contract) / f"source_provenance_{arm}.json", provenance, create)
     if not (args.dry_run or args.check_only):
         out = Path(args.output) / "launch"
         (out / "training_data_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         (out / "paired_protocol_manifest.json").write_text(json.dumps(protocol, indent=2, sort_keys=True) + "\n")
         (out / "source_provenance.json").write_text(json.dumps(sources[args.arm], indent=2, sort_keys=True) + "\n")
-    print(f"Validated both completed 80k sources, training-only LIBERO split and shared protocol ({args.arm})")
+    scope = "this arm's completed 80k source" if independent else "both completed 80k sources"
+    print(f"Validated {scope}, training-only LIBERO split and shared protocol ({args.arm})")
 
 
 def trained(args):
@@ -257,8 +269,12 @@ def main():
             p.add_argument("--" + key, required=True)
         p.add_argument("--smoke", action="store_true")
         if name == "preflight":
-            for key in ("peer", "source-launcher", "peer-launcher", "repo", "config", "runner", "accelerate", "deepspeed", "overlay", "cache"):
+            for key in ("source-launcher", "repo", "config", "runner", "accelerate", "deepspeed", "overlay", "cache"):
                 p.add_argument("--" + key, required=True)
+            p.add_argument("--peer")
+            p.add_argument("--peer-launcher")
+            p.add_argument("--independent-start", action="store_true",
+                           help="Validate only this source; never inspect or resolve the peer source")
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--check-only", action="store_true")
             p.add_argument("--report")
