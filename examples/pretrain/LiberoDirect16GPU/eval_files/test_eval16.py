@@ -27,6 +27,12 @@ def write(path, text):
     path.write_text(textwrap.dedent(text).lstrip())
 
 
+def child_gpu_env(path):
+    return json.loads(next(line[len("FIXTURE_GPU_ENV "):]
+                           for line in path.read_text().splitlines()
+                           if line.startswith("FIXTURE_GPU_ENV ")))
+
+
 def run():
     spec = importlib.util.spec_from_file_location("eval16", SCRIPT)
     evaluator = importlib.util.module_from_spec(spec)
@@ -167,6 +173,27 @@ def run():
         assert future_plan["contract"]["checkpoint_check"] == "deferred until real launch"
         assert not future_output.exists()
         cases.append({"case": "dry_run_allows_missing_future_checkpoint_without_output", "passed": True})
+        identity_map = list(range(8)) * 2
+        override_map = identity_map.copy()
+        override_map[12] = 5
+        override_map_text = ",".join(map(str, override_map))
+        assert future_plan["contract"]["renderer_map"] == identity_map
+        assert future_plan["local_renderer_gpus"] == list(range(8))
+        for invalid in ["0,1,2", ",".join(map(str, identity_map + [0])),
+                        ",".join(map(str, identity_map[:-1] + [8])),
+                        ",".join(map(str, identity_map[:-1] + [-1])),
+                        ",".join(map(str, identity_map[:-1])) + ",x"]:
+            bad = subprocess.run(future_command + ["--dry-run", "--renderer-map", invalid],
+                                 env=env, text=True, capture_output=True, timeout=15)
+            assert bad.returncode != 0 and "Renderer map" in bad.stderr
+            assert not future_output.exists()
+        cases.append({"case": "renderer_map_defaults_to_identity_and_rejects_invalid_input", "passed": True})
+        for extra in [["--smoke-sims-per-gpu", "4"], ["--smoke", "--smoke-sims-per-gpu", "2"]]:
+            bad = subprocess.run(future_command + ["--dry-run"] + extra, env=env, text=True,
+                                 capture_output=True, timeout=15)
+            assert bad.returncode != 0 and "--smoke-sims-per-gpu" in bad.stderr
+            assert not future_output.exists()
+        cases.append({"case": "smoke_simulator_override_restricted_to_smoke_and_choices", "passed": True})
         missing = subprocess.run(future_command, env=env, text=True, capture_output=True, timeout=15)
         assert missing.returncode != 0 and "Final checkpoint is missing" in missing.stderr
         assert not future_output.exists()
@@ -177,8 +204,11 @@ def run():
         assert empty.returncode != 0 and "not a non-empty file" in empty.stderr
         assert not future_output.exists()
         cases.append({"case": "dry_run_rejects_existing_empty_checkpoint", "passed": True})
-        for name, smoke, inject in [("smoke16", True, False), ("full10030", False, False),
-                                    ("episode_error", True, True)]:
+        for name, smoke, inject, smoke_sims, override_renderer in [
+                ("smoke16", True, False, 1, False),
+                ("smoke64_renderer_override", True, False, 4, True),
+                ("full10030", False, False, 1, True),
+                ("episode_error", True, True, 1, False)]:
             out = root / name
             procs, logs = [], []
             for rank in range(2):
@@ -189,6 +219,10 @@ def run():
                            "--evaluation-timeout-sec", "30"]
                 if smoke:
                     command.append("--smoke")
+                if smoke_sims != 1:
+                    command += ["--smoke-sims-per-gpu", str(smoke_sims)]
+                if override_renderer:
+                    command += ["--renderer-map", override_map_text]
                 log = (root / f"{name}_node{rank}.log").open("w")
                 logs.append(log)
                 procs.append(subprocess.Popen(command, env=dict(env, FIXTURE_RANK=str(rank),
@@ -211,14 +245,39 @@ def run():
                     for rank in range(2): print((root / f"{name}_node{rank}.log").read_text())
                     raise AssertionError(exits)
                 report = json.loads((out / "eval_success.json").read_text())
-                assert report["episode_count"] == (16 if smoke else 10030)
+                assert report["episode_count"] == (16 * smoke_sims if smoke else 10030)
                 assert report["validated"] and report["execution_errors"] == 0
+                expected_map = override_map if override_renderer else identity_map
+                assert report["contract"]["renderer_map"] == expected_map
+                if not smoke:
+                    assert report["contract"]["task_assignment_sha256"] == future_plan["contract"]["task_assignment_sha256"]
+                merged = evaluator.records_from(out / "results.jsonl")
+                merged_keys = {(r["suite"], r["task_id"], r["episode_idx"]) for r in merged}
+                assert len(merged_keys) == len(merged)
+                if smoke:
+                    assert merged_keys == {(evaluator.SUITES[gpu % 4], gpu // 4 + 4 * j, 0)
+                                           for gpu in range(16) for j in range(smoke_sims)}
+                worker_count = 0
                 for rank in range(2):
+                    plan = json.loads((out / f"node{rank}/plan.json").read_text())
+                    assert plan["contract"] == report["contract"]
+                    assert plan["local_renderer_gpus"] == expected_map[rank * 8:(rank + 1) * 8]
                     for gpu in range(rank * 8, (rank + 1) * 8):
-                        records = evaluator.records_from(out / f"node{rank}/gpu{gpu:02d}/results.jsonl")
+                        gpu_dir = out / f"node{rank}/gpu{gpu:02d}"
+                        records = evaluator.records_from(gpu_dir / "results.jsonl")
                         assert records and all(r["worker"].startswith(f"node{rank}_gpu{gpu:02d}_") for r in records)
+                        assert child_gpu_env(gpu_dir / "policy_server.log") == {
+                            "CUDA_VISIBLE_DEVICES": str(gpu % 8), "MUJOCO_EGL_DEVICE_ID": None}
+                        workers = list(gpu_dir.glob("*.stdout"))
+                        assert len(workers) == (smoke_sims if smoke else 4)
+                        worker_count += len(workers)
+                        for worker_log in workers:
+                            assert child_gpu_env(worker_log) == {
+                                "CUDA_VISIBLE_DEVICES": "", "MUJOCO_EGL_DEVICE_ID": str(expected_map[gpu])}
+                assert worker_count == (16 * smoke_sims if smoke else 64)
                 cases.append({"case": name, "passed": True, "exit_codes": exits,
-                              "episodes": report["episode_count"], "suite_counts": report["suite_episode_counts"]})
+                              "episodes": report["episode_count"], "workers": worker_count,
+                              "suite_counts": report["suite_episode_counts"]})
         # A single-task helper uses the same policy/worker/queue paths, and the
         # observer leaves original actions and NumPy RNG state unchanged.
         observer = evaluator.load_module("observer_test", HERE / "diagnostic_worker.py")
@@ -275,10 +334,6 @@ def run():
                 expected_renderer = 4 if renderer_gpu is None else renderer_gpu
                 assert report["local_gpu"] == report["policy_gpu"] == 4
                 assert report["renderer_gpu"] == expected_renderer
-                def child_gpu_env(path):
-                    return json.loads(next(line[len("FIXTURE_GPU_ENV "):]
-                                           for line in path.read_text().splitlines()
-                                           if line.startswith("FIXTURE_GPU_ENV ")))
                 assert child_gpu_env(diag_out / "policy_server.log") == {
                     "CUDA_VISIBLE_DEVICES": "4", "MUJOCO_EGL_DEVICE_ID": None}
                 assert child_gpu_env(diag_out / "worker.stdout") == {

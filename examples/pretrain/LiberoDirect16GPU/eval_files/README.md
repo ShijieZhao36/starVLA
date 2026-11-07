@@ -19,10 +19,33 @@ protocol on CPU without creating output or launching processes. A future final
 checkpoint may be absent during `--dry-run`; its size/time fields are then null
 and its existence check is explicitly deferred until real launch. An existing
 empty file is rejected, and a real launch always requires a non-empty final
-checkpoint. `--smoke`
-evaluates 16 distinct tasks, one per GPU and one simulator per GPU, using a
-separate smoke output directory. The formal mode starts 16 policy servers and
-64 simulator workers: 8 GPUs × 4 simulators on each host.
+checkpoint. `--smoke` evaluates 16 distinct tasks, one per GPU and one simulator
+per GPU. `--smoke --smoke-sims-per-gpu 4` runs a larger infrastructure smoke:
+64 distinct tasks, 16 policy servers and 64 simulator workers. Each global GPU
+`g` gets four keys `(SUITES[g % 4], g // 4 + 4*j, 0)` for `j=0..3`, where the
+suite order is LIBERO-10, Goal, Object, Spatial. The four workers use the GPU's
+shared task queue. Use a separate fresh output directory for each smoke. These
+smokes validate infrastructure, not benchmark performance. The formal mode
+always starts 16 policy servers and 64 simulator workers and covers all 10030
+tasks; `--smoke-sims-per-gpu 4` is rejected without `--smoke`.
+
+`--renderer-map` accepts exactly 16 comma-separated physical local GPU indices
+in `[0,7]`, eight for node 0 followed by eight for node 1. By default both nodes
+use the identity map. The policy GPU and task assignment stay fixed; only the
+EGL device for each policy's simulator workers changes. Both hosts must pass
+the same complete map, which is recorded in their shared protocol contract.
+The map selected for this experiment is:
+
+```text
+0,1,2,3,4,5,6,7,0,1,2,3,5,5,6,7
+```
+
+This sends node 1's policy-GPU4 simulators to renderer GPU5. GPU5 therefore
+renders for two policy groups; all 16 policy servers and 64 formal simulator
+workers remain present. CUDA and EGL allocation are separate: the policy still
+uses its original CUDA device, while workers hide CUDA and set the physical
+EGL device. This mapping is an explicit runtime change and must be recorded
+with results; it does not change model, task, seed or action parameters.
 
 The policy server, simulation worker, rollout code and final result verifier
 are imported from the specified repository without modifying them. Protocol:
@@ -58,8 +81,8 @@ python diagnose_one_task.py \
 By default the policy and EGL renderer both use `--local-gpu`. For an isolated
 diagnostic with policy GPU 4 and renderer GPU 5, add `--renderer-gpu 5` and use a
 new output directory. The diagnostic plan records both device IDs. This option
-changes only the simulator child environment; it is unavailable in the formal
-16-GPU evaluator.
+changes only the simulator child environment. The formal evaluator uses the
+separate complete `--renderer-map` option described above.
 
 The environment variables listed above must be set exactly as for the formal
 run. `--dry-run` checks the plan without using a GPU. The observer logs every
@@ -88,6 +111,8 @@ evidence and terminate only child process groups owned by that node.
 `test_eval16.py` runs local CPU integration tests using the original queue and
 verifier sources fetched read-only from neo-bj5. It substitutes small fake
 policy/rollout processes. The tests verify two-node coordination for the
-16-task smoke and complete 10,030-task formal plans, every GPU's participation,
-cross-node failure propagation, and rejection of missing, duplicate, erroneous
-or repeated-attempt records. They do not test actual GPU inference.
+16-task smoke, 64-task/64-worker smoke and complete 10,030-task formal plans,
+every GPU's participation, default/overridden CUDA and EGL mappings, rejection
+of invalid maps and smoke options, cross-node failure propagation, and
+rejection of missing, duplicate, erroneous or repeated-attempt records. They
+do not test actual GPU inference.

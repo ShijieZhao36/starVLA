@@ -11,6 +11,14 @@
       "passed": true
     },
     {
+      "case": "renderer_map_defaults_to_identity_and_rejects_invalid_input",
+      "passed": true
+    },
+    {
+      "case": "smoke_simulator_override_restricted_to_smoke_and_choices",
+      "passed": true
+    },
+    {
       "case": "real_launch_rejects_missing_checkpoint",
       "passed": true
     },
@@ -26,11 +34,28 @@
         0
       ],
       "episodes": 16,
+      "workers": 16,
       "suite_counts": {
         "libero_10": 4,
         "libero_goal": 4,
         "libero_object": 4,
         "libero_spatial": 4
+      }
+    },
+    {
+      "case": "smoke64_renderer_override",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 64,
+      "workers": 64,
+      "suite_counts": {
+        "libero_10": 16,
+        "libero_goal": 16,
+        "libero_object": 16,
+        "libero_spatial": 16
       }
     },
     {
@@ -41,6 +66,7 @@
         0
       ],
       "episodes": 10030,
+      "workers": 64,
       "suite_counts": {
         "libero_10": 2519,
         "libero_goal": 2591,

@@ -32,6 +32,7 @@ EXPECTED_COUNTS = {
 }
 NODES, GPUS_PER_NODE = 2, 8
 WORLD_GPUS = NODES * GPUS_PER_NODE
+DEFAULT_RENDERER_MAP = tuple(range(GPUS_PER_NODE)) * NODES
 
 
 def utc_now():
@@ -49,13 +50,28 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def split_tasks(counts, smoke=False):
+def parse_renderer_map(value):
+    """One physical local EGL index for each of the sixteen policy GPUs."""
+    try:
+        devices = [int(item.strip()) for item in value.split(",")]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Renderer map must contain 16 comma-separated integer GPU indices") from exc
+    if len(devices) != WORLD_GPUS or any(not 0 <= gpu < GPUS_PER_NODE for gpu in devices):
+        raise argparse.ArgumentTypeError("Renderer map requires exactly 16 local GPU indices, each in [0,7]")
+    return devices
+
+
+def split_tasks(counts, smoke=False, smoke_sims_per_gpu=1):
     """Balance every suite over GPUs, preserving its original task identifiers."""
+    if smoke_sims_per_gpu not in (1, 4) or (not smoke and smoke_sims_per_gpu != 1):
+        raise ValueError("Smoke simulator count must be 1 or 4; 4 requires smoke mode")
     shards = [[] for _ in range(WORLD_GPUS)]
     if smoke:
-        # One distinct original task per GPU; exercise all four suites.
+        # One or four distinct original tasks per GPU, covering all four suites.
         for gpu in range(WORLD_GPUS):
-            shards[gpu].append((SUITES[gpu % len(SUITES)], gpu // len(SUITES), 0))
+            for sim in range(smoke_sims_per_gpu):
+                shards[gpu].append((SUITES[gpu % len(SUITES)],
+                                    gpu // len(SUITES) + len(SUITES) * sim, 0))
     else:
         for task_id in range(max(counts.values())):
             for suite in SUITES:
@@ -66,7 +82,8 @@ def split_tasks(counts, smoke=False):
         raise ValueError("Task splitting produced duplicates or an empty GPU shard")
     expected = ({(s, i, 0) for s in SUITES for i in range(counts[s])}
                 if not smoke else set(flat))
-    if set(flat) != expected or len(flat) != (16 if smoke else 10030):
+    if (set(flat) != expected or len(flat) != (WORLD_GPUS * smoke_sims_per_gpu if smoke else 10030)
+            or any(not 0 <= task < counts[suite] for suite, task, _ in flat)):
         raise ValueError("Task splitting does not cover the intended episode set")
     return shards
 
@@ -183,10 +200,17 @@ def parse_args():
     p.add_argument("--peer-timeout-sec", type=int, default=43200)
     p.add_argument("--evaluation-timeout-sec", type=int, default=43200)
     p.add_argument("--smoke", action="store_true",
-                   help="16 episodes, one per GPU, one simulator per GPU")
+                   help="Infrastructure smoke: one or four tasks and simulators per GPU")
+    p.add_argument("--smoke-sims-per-gpu", type=int, choices=(1, 4), default=1,
+                   help="Smoke only: 1 gives 16 tasks/workers; 4 gives 64 tasks/workers")
+    p.add_argument("--renderer-map", type=parse_renderer_map, default=list(DEFAULT_RENDERER_MAP),
+                   help="16 comma-separated physical local EGL indices [0,7], eight for each node; defaults to identity")
     p.add_argument("--dry-run", action="store_true",
                    help="CPU-only task/protocol validation; creates no output")
-    return p.parse_args()
+    args = p.parse_args()
+    if not args.smoke and args.smoke_sims_per_gpu != 1:
+        p.error("--smoke-sims-per-gpu 4 requires --smoke")
+    return args
 
 
 def main():
@@ -220,7 +244,7 @@ def main():
         full_expected = verifier.expected_episode_keys(1)
     if counts != EXPECTED_COUNTS or len(full_expected) != 10030:
         raise ValueError(f"Unexpected benchmark suite counts: {counts}")
-    shards = split_tasks(counts, args.smoke)
+    shards = split_tasks(counts, args.smoke, args.smoke_sims_per_gpu)
     expected = {key for shard in shards for key in shard}
     if not args.smoke and expected != full_expected:
         raise ValueError("Tasks differ from the existing final-result verifier")
@@ -235,7 +259,8 @@ def main():
         "checkpoint_check": "non-empty final checkpoint verified" if checkpoint_stat
                             else "deferred until real launch",
         "suite_counts": counts, "node_count": NODES, "gpu_count": WORLD_GPUS,
-        "sims_per_gpu": 1 if args.smoke else 4, "num_trials_per_task": 1,
+        "sims_per_gpu": args.smoke_sims_per_gpu if args.smoke else 4,
+        "renderer_map": args.renderer_map, "num_trials_per_task": 1,
         "environment_seed": 7, "num_steps_wait": 10, "use_bf16": True,
         "use_canonical_forward": True, "gripper_open_sign": "positive",
         "policy_noise": "original_unseeded", "max_episode_attempts": 1,
@@ -246,6 +271,7 @@ def main():
     }
     plan = {"node_rank": args.node_rank, "contract": contract,
             "global_gpu_episode_counts": [len(shard) for shard in shards],
+            "local_renderer_gpus": args.renderer_map[args.node_rank * 8:(args.node_rank + 1) * 8],
             "local_global_gpus": list(range(args.node_rank * 8, (args.node_rank + 1) * 8))}
     print(json.dumps(plan, indent=2, sort_keys=True), flush=True)
     if args.dry_run:
@@ -284,6 +310,7 @@ def main():
             if any(proc.poll() is not None for proc in procs if getattr(proc, "is_policy", False)):
                 raise RuntimeError("A policy server exited during startup")
             global_gpu = args.node_rank * GPUS_PER_NODE + local_gpu
+            renderer_gpu = args.renderer_map[global_gpu]
             gpu_dir = node_dir / f"gpu{global_gpu:02d}"
             port = args.base_port + local_gpu
             log = gpu_dir / "policy_server.log"
@@ -313,15 +340,16 @@ def main():
                            "--output-dir", str(gpu_dir), "--worker-id", worker_id,
                            "--seed", "7", "--num-steps-wait", "10"]
                 proc = subprocess.Popen(command, cwd=repo,
-                                        env=run_queue_eval._child_env(local_gpu, for_sim=True),
+                                        env=run_queue_eval._child_env(renderer_gpu, for_sim=True),
                                         stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
                 proc.is_policy = False
                 proc.local_gpu = local_gpu
+                proc.renderer_gpu = renderer_gpu
                 proc.worker_id = worker_id
                 proc.log_path = str(worker_log)
                 procs.append(proc)
             print(f"Global GPU {global_gpu}: {len(shards[global_gpu])} episodes, "
-                  f"{contract['sims_per_gpu']} simulators started", flush=True)
+                  f"{contract['sims_per_gpu']} simulators on local renderer GPU {renderer_gpu} started", flush=True)
         deadline = time.monotonic() + args.evaluation_timeout_sec
         last = None
         while True:

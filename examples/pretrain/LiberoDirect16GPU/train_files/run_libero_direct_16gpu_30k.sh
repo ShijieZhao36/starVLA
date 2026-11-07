@@ -71,7 +71,7 @@ smoke_args=(); [[ "$SMOKE_TEST" == 0 ]] || smoke_args=(--smoke)
 gate_args+=("${smoke_args[@]}")
 report_args=(); [[ -z "${CPU_PREFLIGHT_REPORT:-}" ]] || report_args=(--report "$CPU_PREFLIGHT_REPORT")
 coord_args=(--run "$OUTPUT_DIR" --launcher "$LAUNCHER_DIR" --node-rank "$NODE_RANK")
-eval_args=(--node-rank "$NODE_RANK" --repo "$REPO_DIR" --pretrained-path "$OUTPUT_DIR/final_model/pytorch_model.pt" --output-dir "$EVAL_OUTPUT_DIR" "${smoke_args[@]}")
+eval_args=(--node-rank "$NODE_RANK" --repo "$REPO_DIR" --pretrained-path "$OUTPUT_DIR/final_model/pytorch_model.pt" --output-dir "$EVAL_OUTPUT_DIR" --renderer-map 0,1,2,3,4,5,6,7,0,1,2,3,5,5,6,7 "${smoke_args[@]}")
 printf 'run=%s node_rank=%s world_size=16 global_batch=128 dry_run=%s smoke=%s\n' "$RUN_ID" "$NODE_RANK" "$DRY_RUN" "$SMOKE_TEST"
 printf 'Training command: '; printf '%q ' "${train_cmd[@]}"; printf '\n'
 if [[ "$DRY_RUN" == 1 ]]; then
