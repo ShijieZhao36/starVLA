@@ -141,7 +141,10 @@ def initial(args):
     launch = pair.load_json(run / "launch/direct_protocol_manifest.json")
     require(base_identity(audit["configured_base_vlm"]) == launch["base_vlm"], "Base Qwen files changed after preflight")
     text = (run / "train.log").read_text(errors="replace")
-    require("No pretrained checkpoint provided. Starting training from scratch." in text, "Trainer has not confirmed fresh direct initialization")
+    # Rich wraps this message across lines and inserts a source-location column.
+    # The null config, absent reload audit and exact initial hashes above are the
+    # authoritative checks; this stable log prefix confirms the expected branch.
+    require("No pretrained checkpoint" in text, "Trainer has not confirmed fresh direct initialization")
     require("loaded <full_model> model parameters" not in text and "Loaded pretrained checkpoint:" not in text,
             "Unexpected robot checkpoint load reported")
     report = {"status": "initial_passed", "arm": "direct", "statistics_sha256": REFERENCE_STATS,
