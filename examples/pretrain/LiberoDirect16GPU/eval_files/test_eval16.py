@@ -91,17 +91,29 @@ def run():
         write(parallel / "eval_worker.py", '''
             import argparse,os
             from task_queue import TaskQueueClient
-            p=argparse.ArgumentParser();p.add_argument('--queue-port',type=int)
-            p.add_argument('--worker-id');a,_=p.parse_known_args()
-            q=TaskQueueClient('127.0.0.1',a.queue_port)
-            while True:
-                t=q.next_task()
-                if t is None:break
-                if os.environ.get('INJECT_ERROR')=='1' and a.worker_id=='node1_gpu08_0':
-                    q.release();continue
-                t.update(success=t['task_id']%2==0,category='CPU fixture',name=str(t['task_id']),worker=a.worker_id)
-                q.report(t)
-            q.close()
+            class FakeEnv:
+                def step(self,action):return None
+                def close(self):return None
+            def _get_libero_env(*a,**k):return FakeEnv(),'CPU fixture'
+            def rollout_episode(env,**kwargs):
+                env.step([0.0]*7);return False,[]
+            def main():
+                p=argparse.ArgumentParser();p.add_argument('--queue-port',type=int)
+                p.add_argument('--worker-id');a,_=p.parse_known_args()
+                q=TaskQueueClient('127.0.0.1',a.queue_port)
+                while True:
+                    t=q.next_task()
+                    if t is None:break
+                    if os.environ.get('INJECT_ABORT')=='1':os.abort()
+                    if os.environ.get('INJECT_ERROR')=='1' and a.worker_id=='node1_gpu08_0':
+                        q.release();continue
+                    env,_=_get_libero_env()
+                    rollout_episode(env=env,max_steps=520,num_steps_wait=10)
+                    env.close()
+                    t.update(success=t['task_id']%2==0,category='CPU fixture',name=str(t['task_id']),worker=a.worker_id)
+                    q.report(t)
+                q.close()
+            if __name__=='__main__':main()
         ''')
         write(parallel / "libero_rollout.py", "# CPU fixture: no rollout executed\n")
         write(parallel / "remote_policy.py", "# CPU fixture: no model loaded\n")
@@ -200,6 +212,59 @@ def run():
                         assert records and all(r["worker"].startswith(f"node{rank}_gpu{gpu:02d}_") for r in records)
                 cases.append({"case": name, "passed": True, "exit_codes": exits,
                               "episodes": report["episode_count"], "suite_counts": report["suite_episode_counts"]})
+        # A single-task helper uses the same policy/worker/queue paths, and the
+        # observer leaves original actions and NumPy RNG state unchanged.
+        observer = evaluator.load_module("observer_test", HERE / "diagnostic_worker.py")
+        import numpy as np
+        from types import SimpleNamespace
+        action = [0.25, -0.5, 0.0]
+        seen = []
+        class ObservedEnv:
+            def step(self, actual):
+                assert actual is action
+                seen.append(actual)
+                return ("unchanged",)
+            def close(self):
+                return "closed"
+        observed = ObservedEnv()
+        module = SimpleNamespace(_get_libero_env=lambda:(observed,"test"),
+                                 rollout_episode=lambda **kwargs:(False, []))
+        observer.attach_observers(module)
+        state = np.random.get_state()
+        import contextlib,io
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            observed_env,_ = module._get_libero_env()
+            assert observed_env.step(action) == ("unchanged",)
+            assert observed_env.close() == "closed"
+            assert module.rollout_episode(max_steps=520,num_steps_wait=10) == (False, [])
+        after = np.random.get_state()
+        assert state[0] == after[0] and np.array_equal(state[1],after[1]) and state[2:] == after[2:]
+        assert seen == [action] and '"action_finite": true' in captured.getvalue()
+        cases.append({"case":"diagnostic_observer_preserves_action_identity_return_values_and_rng","passed":True})
+        for abort in [False, True]:
+            diag_out = root / ("single_task_abort" if abort else "single_task_ok")
+            command = [sys.executable, str(HERE / "diagnose_one_task.py"), "--repo", str(repo),
+                       "--pretrained-path", str(ckpt), "--output-dir", str(diag_out),
+                       "--suite", "libero_10", "--task-id", "3", "--local-gpu", "4",
+                       "--base-port", "15400", "--server-timeout-sec", "15", "--timeout-sec", "30"]
+            result = subprocess.run(command, env=dict(env,INJECT_ABORT="1" if abort else "0"),
+                                    capture_output=True, text=True, timeout=45)
+            if abort:
+                failure = json.loads((diag_out / "failure.json").read_text())
+                assert result.returncode != 0 and "SIGABRT" in failure["error"]
+                assert "worker_id=diagnostic_gpu4_libero_10_3" in failure["error"]
+                assert "pid=" in failure["error"] and "log=" in failure["error"]
+                assert "Fatal Python error: Aborted" in (diag_out / "worker.stdout").read_text()
+                assert not (diag_out / "diagnostic_success.json").exists()
+                cases.append({"case":"diagnostic_captures_native_abort_and_named_worker_evidence","passed":True})
+            else:
+                if result.returncode != 0:print(result.stdout,result.stderr)
+                assert result.returncode == 0
+                report = json.loads((diag_out / "diagnostic_success.json").read_text())
+                assert report["episode_count"] == 1 and report["diagnostic_only"] is True
+                assert '"env_step": 1' in (diag_out / "worker.stdout").read_text()
+                assert '"event": "env_close_end"' in (diag_out / "worker.stdout").read_text()
+                cases.append({"case":"single_task_diagnostic_original_queue_worker_integration","passed":True})
         # Validation failures are checked against the original verifier.
         sys.path.insert(0, str(parallel))
         import task_queue

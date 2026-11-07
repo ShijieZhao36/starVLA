@@ -39,6 +39,36 @@ successful full run must have suite counts 2,402 / 2,518 / 2,591 / 2,519 for
 Spatial / Object / Goal / LIBERO-10, with no missing tasks, duplicates or
 execution errors.
 
+## Isolated native-crash diagnostic
+
+`diagnose_one_task.py` is separate from the formal 16-GPU evaluator. It runs one
+original policy server, one original worker with observation-only wrappers,
+and the original task queue with one attempt. It never writes a formal
+`eval_success.json`. Example for neo-bj6 local GPU 4, using a completed reference
+model only to check evaluation infrastructure:
+
+```bash
+python diagnose_one_task.py \
+  --repo /mnt/zhaoshijie/workspace/starVLA_libero_direct_ln_16gpu_30k_20261107 \
+  --pretrained-path /mnt/zhaoshijie/checkpoints/starVLA/libero_from_galaxea_control_ln_8gpu_60k_20261105_pair/final_model/pytorch_model.pt \
+  --output-dir /absolute/fresh/diagnostic_control_task3 \
+  --suite libero_10 --task-id 3 --local-gpu 4
+```
+
+The environment variables listed above must be set exactly as for the formal
+run. `--dry-run` checks the plan without using a GPU. The observer logs every
+environment step's action shape, finite count and finite min/max; it forwards
+the exact original action object, does not clip or replace values, and does not
+change RNG state. It logs rollout return and environment-close boundaries.
+Both policy and worker enable Python's native fatal-signal traceback handler.
+Worker errors include worker ID, PID, exit code, signal name and log path.
+
+Output includes `worker.stdout`, `policy_server.log`, `processes.json`, the
+one-episode results and a `diagnostic_success.json` or `failure.json`. A
+reference policy that finishes successfully before the 520-step limit does not
+establish that a full-length random-action trajectory is stable. This tool does
+not modify the training initialization or the formal 10030-task selection.
+
 Shared output contains `node0/` and `node1/` with immutable run claims,
 protocol plans, GPU logs, node results and exit markers. Final aggregate files
 are `results.jsonl`, `summary.json`, `summary.txt`,

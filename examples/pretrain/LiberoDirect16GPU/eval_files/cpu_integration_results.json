@@ -57,6 +57,18 @@
       ]
     },
     {
+      "case": "diagnostic_observer_preserves_action_identity_return_values_and_rng",
+      "passed": true
+    },
+    {
+      "case": "single_task_diagnostic_original_queue_worker_integration",
+      "passed": true
+    },
+    {
+      "case": "diagnostic_captures_native_abort_and_named_worker_evidence",
+      "passed": true
+    },
+    {
       "case": "reject_missing",
       "passed": true
     },

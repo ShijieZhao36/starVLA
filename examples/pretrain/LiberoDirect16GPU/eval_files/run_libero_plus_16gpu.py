@@ -141,6 +141,19 @@ def records_from(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def process_failure(proc, kind):
+    code = proc.returncode
+    signal_name = ""
+    if code is not None and code < 0:
+        try:
+            signal_name = f" signal={signal.Signals(-code).name}"
+        except ValueError:
+            signal_name = f" signal={-code}"
+    return (f"{kind} worker_id={getattr(proc, 'worker_id', 'unknown')} "
+            f"pid={proc.pid} exit_code={code}{signal_name} "
+            f"log={getattr(proc, 'log_path', 'unknown')}")
+
+
 def merge_validate(paths, destination, expected, queue_module, verifier):
     records = [record for path in paths for record in records_from(path)]
     # No retries: multiple attempts could alter stochastic policy outcomes.
@@ -276,7 +289,7 @@ def main():
             log = gpu_dir / "policy_server.log"
             handle = log.open("w")
             handles.append(handle)
-            command = [sys.executable, "-u", str(parallel / "policy_chunk_server.py"),
+            command = [sys.executable, "-X", "faulthandler", "-u", str(parallel / "policy_chunk_server.py"),
                        "--pretrained-path", str(ckpt), "--port", str(port),
                        "--use-canonical-forward", "true", "--gripper-open-sign", "positive",
                        "--idle-timeout", "-1", "--use-bf16"]
@@ -284,13 +297,16 @@ def main():
                                     env=run_queue_eval._child_env(local_gpu, for_sim=False),
                                     stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
             proc.is_policy = True
+            proc.worker_id = f"node{args.node_rank}_gpu{global_gpu:02d}_policy"
+            proc.log_path = str(log)
             procs.append(proc)
             run_queue_eval._wait_for_port(port, proc, args.server_timeout_sec, log)
             for sim in range(contract["sims_per_gpu"]):
                 worker_id = f"node{args.node_rank}_gpu{global_gpu:02d}_{sim}"
-                handle = (gpu_dir / f"{worker_id}.stdout").open("w")
+                worker_log = gpu_dir / f"{worker_id}.stdout"
+                handle = worker_log.open("w")
                 handles.append(handle)
-                command = [sys.executable, "-u", str(parallel / "eval_worker.py"),
+                command = [sys.executable, "-X", "faulthandler", "-u", str(parallel / "eval_worker.py"),
                            "--host", "127.0.0.1", "--port", str(port),
                            "--queue-host", "127.0.0.1", "--queue-port",
                            str(args.base_port + GPUS_PER_NODE + local_gpu),
@@ -301,6 +317,8 @@ def main():
                                         stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
                 proc.is_policy = False
                 proc.local_gpu = local_gpu
+                proc.worker_id = worker_id
+                proc.log_path = str(worker_log)
                 procs.append(proc)
             print(f"Global GPU {global_gpu}: {len(shards[global_gpu])} episodes, "
                   f"{contract['sims_per_gpu']} simulators started", flush=True)
@@ -321,9 +339,9 @@ def main():
                 raise TimeoutError("Node evaluation exceeded its bounded runtime")
             for proc in procs:
                 if getattr(proc, "is_policy", False) and proc.poll() is not None:
-                    raise RuntimeError(f"Policy server {proc.pid} exited: {proc.returncode}")
+                    raise RuntimeError(process_failure(proc, "Policy server exited"))
                 if not getattr(proc, "is_policy", False) and proc.poll() not in (None, 0):
-                    raise RuntimeError(f"Simulation worker {proc.pid} exited: {proc.returncode}")
+                    raise RuntimeError(process_failure(proc, "Simulation worker exited"))
             for gpu, state in enumerate(progress):
                 workers = [p for p in procs if getattr(p, "local_gpu", None) == gpu]
                 if state[0] < state[1] and all(p.poll() is not None for p in workers):
@@ -337,7 +355,7 @@ def main():
         for proc in procs:
             if not getattr(proc, "is_policy", False):
                 if proc.wait(timeout=600) != 0:
-                    raise RuntimeError(f"Worker exited with {proc.returncode}")
+                    raise RuntimeError(process_failure(proc, "Simulation worker exited"))
         # Stop this node's inference servers before waiting for the peer.
         stop_children(procs)
         for queue in queues:
