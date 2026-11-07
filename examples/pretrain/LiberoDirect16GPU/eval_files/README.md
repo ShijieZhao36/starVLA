@@ -37,11 +37,11 @@ the same complete map, which is recorded in their shared protocol contract.
 The map selected for this experiment is:
 
 ```text
-0,1,2,3,4,5,6,7,0,1,2,3,5,5,6,7
+0,1,2,3,4,5,6,7,0,1,6,1,5,5,6,7
 ```
 
-This sends node 1's policy-GPU4 simulators to renderer GPU5. GPU5 therefore
-renders for two policy groups; all 16 policy servers and 64 formal simulator
+This sends node 1's policy-GPU2/GPU3/GPU4 simulators to renderer GPU6/GPU1/GPU5,
+respectively. GPU1, GPU5 and GPU6 each render for two policy groups; all 16 policy servers and 64 formal simulator
 workers remain present. CUDA and EGL allocation are separate: the policy still
 uses its original CUDA device, while workers hide CUDA and set the physical
 EGL device. This mapping is an explicit runtime change and must be recorded

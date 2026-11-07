@@ -33,7 +33,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 unset MUJOCO_EGL_DEVICE_ID
 cd "$REPO_DIR"
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" && -z "$(git status --porcelain --untracked-files=all)" ]] || die 'Checkout differs from pinned clean commit'
-eval_args=(--repo "$REPO_DIR" --node-rank "$NODE_RANK" --pretrained-path "$REFERENCE_CHECKPOINT" --output-dir "$REFERENCE_EVAL_DIR" --smoke --smoke-sims-per-gpu 4 --renderer-map 0,1,2,3,4,5,6,7,0,1,2,3,5,5,6,7)
+eval_args=(--repo "$REPO_DIR" --node-rank "$NODE_RANK" --pretrained-path "$REFERENCE_CHECKPOINT" --output-dir "$REFERENCE_EVAL_DIR" --smoke --smoke-sims-per-gpu 4 --renderer-map 0,1,2,3,4,5,6,7,0,1,6,1,5,5,6,7)
 coord_args=(--run "$STAGING" --launcher "$LAUNCHER_DIR" --node-rank "$NODE_RANK")
 if [[ "$DRY_RUN" == 1 ]]; then
  CUDA_VISIBLE_DEVICES='' "$PYTHON_BIN" "$REUSE" training --repo "$REPO_DIR"

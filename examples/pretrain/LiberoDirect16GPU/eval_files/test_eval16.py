@@ -175,6 +175,8 @@ def run():
         cases.append({"case": "dry_run_allows_missing_future_checkpoint_without_output", "passed": True})
         identity_map = list(range(8)) * 2
         override_map = identity_map.copy()
+        override_map[10] = 6
+        override_map[11] = 1
         override_map[12] = 5
         override_map_text = ",".join(map(str, override_map))
         assert future_plan["contract"]["renderer_map"] == identity_map

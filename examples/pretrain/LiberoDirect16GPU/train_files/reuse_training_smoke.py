@@ -17,7 +17,7 @@ REFERENCE_CHECKPOINT = REFERENCE_RUN / 'final_model/pytorch_model.pt'
 REFERENCE_CONTRACT = Path('/mnt/zhaoshijie/checkpoints/starVLA/launcher_logs/galaxea_libero_posttrain60k_20261105_contract')
 TRAINING_DATA = Path('/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1/dataset_absolute')
 EXPERIMENT = Path('examples/pretrain/LiberoDirect16GPU')
-RENDERER_MAP = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 5, 5, 6, 7]
+RENDERER_MAP = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 6, 1, 5, 5, 6, 7]
 
 
 def require(value, message):
