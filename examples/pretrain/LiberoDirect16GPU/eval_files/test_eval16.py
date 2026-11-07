@@ -81,7 +81,8 @@ def run():
         for name, source in sources.items():
             write(repo / name, source)
         write(parallel / "policy_chunk_server.py", '''
-            import argparse,socket,time
+            import argparse,json,os,socket,time
+            print('FIXTURE_GPU_ENV '+json.dumps({k:os.environ.get(k) for k in ['CUDA_VISIBLE_DEVICES','MUJOCO_EGL_DEVICE_ID']}),flush=True)
             p=argparse.ArgumentParser();p.add_argument('--port',type=int);a,_=p.parse_known_args()
             s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
             s.bind(('127.0.0.1',a.port));s.listen()
@@ -89,7 +90,7 @@ def run():
                 c,_=s.accept();c.close()
         ''')
         write(parallel / "eval_worker.py", '''
-            import argparse,os
+            import argparse,json,os
             from task_queue import TaskQueueClient
             class FakeEnv:
                 def step(self,action):return None
@@ -98,6 +99,7 @@ def run():
             def rollout_episode(env,**kwargs):
                 env.step([0.0]*7);return False,[]
             def main():
+                print('FIXTURE_GPU_ENV '+json.dumps({k:os.environ.get(k) for k in ['CUDA_VISIBLE_DEVICES','MUJOCO_EGL_DEVICE_ID']}),flush=True)
                 p=argparse.ArgumentParser();p.add_argument('--queue-port',type=int)
                 p.add_argument('--worker-id');a,_=p.parse_known_args()
                 q=TaskQueueClient('127.0.0.1',a.queue_port)
@@ -119,7 +121,12 @@ def run():
         write(parallel / "remote_policy.py", "# CPU fixture: no model loaded\n")
         write(parallel / "run_queue_eval.py", '''
             import os,socket,time
-            def _child_env(gpu_id,for_sim):return os.environ.copy()
+            def _child_env(gpu_id,for_sim):
+                env=os.environ.copy()
+                env['CUDA_VISIBLE_DEVICES']='' if for_sim else str(gpu_id)
+                if for_sim:env['MUJOCO_EGL_DEVICE_ID']=str(gpu_id)
+                else:env.pop('MUJOCO_EGL_DEVICE_ID',None)
+                return env
             def _wait_for_port(port,proc,timeout,log):
                 deadline=time.monotonic()+timeout
                 while time.monotonic()<deadline:
@@ -241,12 +248,15 @@ def run():
         assert state[0] == after[0] and np.array_equal(state[1],after[1]) and state[2:] == after[2:]
         assert seen == [action] and '"action_finite": true' in captured.getvalue()
         cases.append({"case":"diagnostic_observer_preserves_action_identity_return_values_and_rng","passed":True})
-        for abort in [False, True]:
-            diag_out = root / ("single_task_abort" if abort else "single_task_ok")
+        for abort, renderer_gpu in [(False, None), (True, None), (False, 5)]:
+            label = "single_task_abort" if abort else ("single_task_ok" if renderer_gpu is None else "single_task_split_gpu")
+            diag_out = root / label
             command = [sys.executable, str(HERE / "diagnose_one_task.py"), "--repo", str(repo),
                        "--pretrained-path", str(ckpt), "--output-dir", str(diag_out),
                        "--suite", "libero_10", "--task-id", "3", "--local-gpu", "4",
                        "--base-port", "15400", "--server-timeout-sec", "15", "--timeout-sec", "30"]
+            if renderer_gpu is not None:
+                command += ["--renderer-gpu", str(renderer_gpu)]
             result = subprocess.run(command, env=dict(env,INJECT_ABORT="1" if abort else "0"),
                                     capture_output=True, text=True, timeout=45)
             if abort:
@@ -262,9 +272,22 @@ def run():
                 assert result.returncode == 0
                 report = json.loads((diag_out / "diagnostic_success.json").read_text())
                 assert report["episode_count"] == 1 and report["diagnostic_only"] is True
+                expected_renderer = 4 if renderer_gpu is None else renderer_gpu
+                assert report["local_gpu"] == report["policy_gpu"] == 4
+                assert report["renderer_gpu"] == expected_renderer
+                def child_gpu_env(path):
+                    return json.loads(next(line[len("FIXTURE_GPU_ENV "):]
+                                           for line in path.read_text().splitlines()
+                                           if line.startswith("FIXTURE_GPU_ENV ")))
+                assert child_gpu_env(diag_out / "policy_server.log") == {
+                    "CUDA_VISIBLE_DEVICES": "4", "MUJOCO_EGL_DEVICE_ID": None}
+                assert child_gpu_env(diag_out / "worker.stdout") == {
+                    "CUDA_VISIBLE_DEVICES": "", "MUJOCO_EGL_DEVICE_ID": str(expected_renderer)}
                 assert '"env_step": 1' in (diag_out / "worker.stdout").read_text()
                 assert '"event": "env_close_end"' in (diag_out / "worker.stdout").read_text()
-                cases.append({"case":"single_task_diagnostic_original_queue_worker_integration","passed":True})
+                cases.append({"case":("single_task_diagnostic_original_queue_worker_integration"
+                                      if renderer_gpu is None else "diagnostic_renderer_override_preserves_policy_gpu"),
+                              "passed":True})
         # Validation failures are checked against the original verifier.
         sys.path.insert(0, str(parallel))
         import task_queue

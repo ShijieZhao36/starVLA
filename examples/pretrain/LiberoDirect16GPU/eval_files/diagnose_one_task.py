@@ -31,11 +31,14 @@ def main():
     p.add_argument("--suite", required=True, choices=SUITES)
     p.add_argument("--task-id", required=True, type=int)
     p.add_argument("--local-gpu", required=True, type=int, choices=range(8))
+    p.add_argument("--renderer-gpu", type=int, choices=range(8),
+                   help="Diagnostic EGL device; defaults to the policy's --local-gpu")
     p.add_argument("--base-port", type=int, default=11483)
     p.add_argument("--server-timeout-sec", type=int, default=600)
     p.add_argument("--timeout-sec", type=int, default=1800)
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
+    renderer_gpu = args.local_gpu if args.renderer_gpu is None else args.renderer_gpu
     repo, ckpt, out = args.repo.resolve(), args.pretrained_path.resolve(), args.output_dir.resolve()
     if ckpt.name != "pytorch_model.pt" or ckpt.parent.name != "final_model":
         raise ValueError("Only a final_model/pytorch_model.pt checkpoint is accepted")
@@ -59,7 +62,8 @@ def main():
     observer = Path(__file__).with_name("diagnostic_worker.py")
     plan = {"diagnostic_only": True, "checkpoint": str(ckpt), "checkpoint_bytes": ckpt.stat().st_size,
             "suite": args.suite, "task_id": args.task_id, "episode_idx": 0,
-            "local_gpu": args.local_gpu, "environment_seed": 7, "num_steps_wait": 10,
+            "local_gpu": args.local_gpu, "policy_gpu": args.local_gpu,
+            "renderer_gpu": renderer_gpu, "environment_seed": 7, "num_steps_wait": 10,
             "canonical_forward": True, "bf16": True, "gripper_open_sign": "positive",
             "policy_noise": "original_unseeded", "max_episode_attempts": 1,
             "observer_sha256": sha256(observer), "time": utc_now()}
@@ -101,7 +105,7 @@ def main():
                    "--queue-host", "127.0.0.1", "--queue-port", str(args.base_port + 1),
                    "--output-dir", str(out), "--worker-id", worker_id,
                    "--seed", "7", "--num-steps-wait", "10"]
-        worker = subprocess.Popen(command, cwd=repo, env=run_queue_eval._child_env(args.local_gpu, for_sim=True),
+        worker = subprocess.Popen(command, cwd=repo, env=run_queue_eval._child_env(renderer_gpu, for_sim=True),
                                   stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
         worker.worker_id, worker.log_path = worker_id, str(log)
         procs.append(worker)

@@ -55,6 +55,12 @@ python diagnose_one_task.py \
   --suite libero_10 --task-id 3 --local-gpu 4
 ```
 
+By default the policy and EGL renderer both use `--local-gpu`. For an isolated
+diagnostic with policy GPU 4 and renderer GPU 5, add `--renderer-gpu 5` and use a
+new output directory. The diagnostic plan records both device IDs. This option
+changes only the simulator child environment; it is unavailable in the formal
+16-GPU evaluator.
+
 The environment variables listed above must be set exactly as for the formal
 run. `--dry-run` checks the plan without using a GPU. The observer logs every
 environment step's action shape, finite count and finite min/max; it forwards

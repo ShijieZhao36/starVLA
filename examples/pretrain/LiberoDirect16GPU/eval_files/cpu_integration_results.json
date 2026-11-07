@@ -69,6 +69,10 @@
       "passed": true
     },
     {
+      "case": "diagnostic_renderer_override_preserves_policy_gpu",
+      "passed": true
+    },
+    {
       "case": "reject_missing",
       "passed": true
     },
