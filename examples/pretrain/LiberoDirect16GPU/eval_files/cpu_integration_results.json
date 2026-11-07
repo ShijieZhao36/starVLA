@@ -1,0 +1,76 @@
+{
+  "validated": true,
+  "test_type": "CPU scheduler integration; no GPU inference",
+  "cases": [
+    {
+      "case": "cleanup_exited_leader_descendant_and_preserve_unrelated_group",
+      "passed": true
+    },
+    {
+      "case": "dry_run_allows_missing_future_checkpoint_without_output",
+      "passed": true
+    },
+    {
+      "case": "real_launch_rejects_missing_checkpoint",
+      "passed": true
+    },
+    {
+      "case": "dry_run_rejects_existing_empty_checkpoint",
+      "passed": true
+    },
+    {
+      "case": "smoke16",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 16,
+      "suite_counts": {
+        "libero_10": 4,
+        "libero_goal": 4,
+        "libero_object": 4,
+        "libero_spatial": 4
+      }
+    },
+    {
+      "case": "full10030",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 10030,
+      "suite_counts": {
+        "libero_10": 2519,
+        "libero_goal": 2591,
+        "libero_object": 2518,
+        "libero_spatial": 2402
+      }
+    },
+    {
+      "case": "episode_error",
+      "passed": true,
+      "exit_codes": [
+        1,
+        1
+      ]
+    },
+    {
+      "case": "reject_missing",
+      "passed": true
+    },
+    {
+      "case": "reject_duplicate",
+      "passed": true
+    },
+    {
+      "case": "reject_execution_error",
+      "passed": true
+    },
+    {
+      "case": "reject_repeated_attempt",
+      "passed": true
+    }
+  ]
+}
