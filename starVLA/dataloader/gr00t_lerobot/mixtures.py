@@ -19,6 +19,11 @@ COMPOSED_DATASET_MIXTURES = {
 }
 
 
+# BEGIN Ego50 A/B composed dataset declarations (20261110)
+COMPOSED_DATASET_MIXTURES.update({'galaxea_libero_ego50_A': [('galaxea_open_world_stage1', 0.3), ('libero_plus_stage1', 0.2), ('xperience_hours100', 0.5)], 'galaxea_libero_ego50_B': [('galaxea_open_world_stage1', 0.4), ('libero_plus_stage1', 0.1), ('xperience_hours100', 0.5)]})
+# END Ego50 A/B composed dataset declarations (20261110)
+
+
 def resolve_dataset_mixture(name, registry):
     if name not in COMPOSED_DATASET_MIXTURES:
         return list(registry[name])
