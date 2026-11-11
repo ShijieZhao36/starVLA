@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -53,13 +54,23 @@ def assert_architecture(cfg):
     require(cfg["seed"] == 42, "Expected seed=42")
 
 
-def validate_source(run, arm, launcher_dir):
+def validate_source(run, arm, launcher_dir, source_smoke=False):
     run = Path(run).resolve(strict=True)
     marker = load_json(run / "pretrain_success.json")
     cfg = load_yaml(run / "config.full.yaml")
     checkpoint = run / "final_model/pytorch_model.pt"
     require(marker["arm"] == arm, f"Source arm mismatch: expected {arm}, got {marker['arm']!r}")
-    require(marker["steps"] == 80000 and cfg["trainer"]["max_train_steps"] == 80000, "Source must have completed 80000 updates")
+    source_steps = 3 if source_smoke else 80000
+    require(marker["steps"] == source_steps and cfg["trainer"]["max_train_steps"] == source_steps,
+            f"Source must have completed {source_steps} updates")
+    if source_smoke:
+        metrics = [json.loads(line) for line in (run / "metrics.jsonl").read_text().splitlines() if line.strip()]
+        require(bool(metrics) and metrics[-1]["step"] == 3, "Smoke source must have real 3-step metrics")
+        require(all(math.isfinite(row["action_dit_loss"]) and
+                    row["source_exposure/cumulative_examples"] == row["step"] * 64 for row in metrics),
+                "Smoke source must have finite loss and global64 sample exposure")
+        require(metrics[-1]["source_exposure/cumulative_examples"] == 192,
+                "Smoke source must have 192 cumulative examples")
     require(Path(marker["checkpoint"]).is_absolute(), "Source marker checkpoint must be absolute")
     require(Path(marker["checkpoint"]).resolve() == checkpoint, "Source marker must select final_model/pytorch_model.pt")
     require(checkpoint.is_file() and checkpoint.stat().st_size > 0, "Missing final checkpoint")
@@ -111,6 +122,8 @@ def pinned_contract(path, value, create):
 
 
 def preflight(args):
+    source_smoke = getattr(args, "source_smoke", False)
+    require(not source_smoke or args.smoke, "--source-smoke requires --smoke")
     peer_arm = "mixed" if args.arm == "control" else "control"
     independent = args.independent_start
     selected_sources = [(args.arm, args.source, args.source_launcher)]
@@ -121,7 +134,7 @@ def preflight(args):
     sources, readiness_errors = {}, []
     for arm, run, launcher in selected_sources:
         try:
-            sources[arm] = validate_source(run, arm, launcher)
+            sources[arm] = validate_source(run, arm, launcher, source_smoke=source_smoke)
         except Exception as exc:
             if not args.dry_run:
                 raise
@@ -271,6 +284,8 @@ def main():
         if name == "preflight":
             for key in ("source-launcher", "repo", "config", "runner", "accelerate", "deepspeed", "overlay", "cache"):
                 p.add_argument("--" + key, required=True)
+            p.add_argument("--source-smoke", action="store_true",
+                           help="Only with --smoke: accept a real 3-step global64 source")
             p.add_argument("--peer")
             p.add_argument("--peer-launcher")
             p.add_argument("--independent-start", action="store_true",

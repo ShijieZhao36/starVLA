@@ -21,7 +21,9 @@ RUN_ROOT_DIR="${RUN_ROOT_DIR:-/mnt/zhaoshijie/checkpoints/starVLA}"
 PAIR_PROTOCOL_DIR="${PAIR_PROTOCOL_DIR:-$RUN_ROOT_DIR/launcher_logs/galaxea_libero_pair_posttrain60k_20261105}"
 DRY_RUN="${DRY_RUN:-1}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
-for flag in DRY_RUN SMOKE_TEST; do [[ "${!flag}" =~ ^[01]$ ]] || die "$flag must be 0 or 1"; done
+SOURCE_SMOKE_TEST="${SOURCE_SMOKE_TEST:-0}"
+for flag in DRY_RUN SMOKE_TEST SOURCE_SMOKE_TEST; do [[ "${!flag}" =~ ^[01]$ ]] || die "$flag must be 0 or 1"; done
+[[ "$SOURCE_SMOKE_TEST" == 0 || "$SMOKE_TEST" == 1 ]] || die 'SOURCE_SMOKE_TEST requires SMOKE_TEST=1'
 for path in "$REPO_DIR" "$PRETRAIN_RUN_DIR" "$RUN_ROOT_DIR" "$PAIR_PROTOCOL_DIR"; do
   [[ "$path" == /* ]] || die "Path must be absolute: $path"
 done
@@ -104,6 +106,7 @@ else
   gate_args+=(--independent-start)
 fi
 [[ "$SMOKE_TEST" == 0 ]] || gate_args+=(--smoke)
+[[ "$SOURCE_SMOKE_TEST" == 0 ]] || gate_args+=(--source-smoke)
 report_args=()
 [[ -z "${CPU_PREFLIGHT_REPORT:-}" ]] || report_args=(--report "$CPU_PREFLIGHT_REPORT")
 printf 'Host=%s arm=%s run=%s dry_run=%s smoke=%s require_paired_source=%s global_batch=64\n' "$(hostname)" "$ARM" "$RUN_ID" "$DRY_RUN" "$SMOKE_TEST" "$REQUIRE_PAIRED_SOURCE"
