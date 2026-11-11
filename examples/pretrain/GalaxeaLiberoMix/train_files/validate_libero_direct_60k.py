@@ -70,7 +70,7 @@ def compare_config(actual, expected, smoke):
     actual["trainer"].pop("expected_initial_model_sha256")
     expected["trainer"]["pretrained_checkpoint"] = None
     for cfg in (actual, expected):
-        for key in ("run_id", "output_dir", "config_yaml"):
+        for key in ("run_id", "run_root_dir", "output_dir", "config_yaml"):
             cfg.pop(key, None)
     if smoke:
         expected["trainer"].update(max_train_steps=3, num_warmup_steps=1, save_interval=3,
@@ -78,9 +78,22 @@ def compare_config(actual, expected, smoke):
     require(actual == expected, "Resolved config differs from matched control beyond allowed initialization/run/smoke changes")
 
 
+APPROVED_HELPER = '2efaf1b77fda00adc3aebef4cce72106ea92917afd78b060ff447113d2ae0cc0'
+APPROVED_MIXTURES = 'e4546b069d91b3b65653e301c9abba4e89096e205020b0f5ce270c7039be3b18'
+
+def assert_integrated_source_pins(repo):
+    # These reviewed additions permit DROID/Ego registration and explicit source
+    # smoke checks while retaining the original model/data/evaluation hashes.
+    require(pair.digest(pair.__file__) == APPROVED_HELPER,
+            "Integrated posttraining helper differs from the reviewed version")
+    require(pair.digest(repo / "starVLA/dataloader/gr00t_lerobot/mixtures.py") == APPROVED_MIXTURES,
+            "Dataset mixture declarations differ from the reviewed version")
+
+
 def preflight(args):
     protocol, parity = reference(args)
     repo = Path(args.repo).resolve(strict=True)
+    assert_integrated_source_pins(repo)
     cfg = pair.load_yaml(args.config)
     pair.assert_architecture(cfg)
     require(cfg == protocol["common_config"], "Common YAML differs from the completed matched pair")
@@ -88,11 +101,12 @@ def preflight(args):
             "Base VLM must be the same original Qwen3-VL source")
     status = subprocess.check_output(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"], text=True)
     require(not status.strip(), "Repository must be committed and clean: " + status)
-    changed = set(subprocess.check_output(["git", "-C", str(repo), "diff", "--name-only", protocol["repo_commit"], "HEAD"], text=True).splitlines())
-    require(changed == ALLOWED_ADDITIONS, "Only the new direct runner and validator may differ from the matched commit: " + str(sorted(changed)))
+    require(subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", protocol["repo_commit"], "HEAD"],
+                           capture_output=True).returncode == 0,
+            "Checkout must retain the historical matched-experiment base")
     for name, expected in protocol["code_sha256"].items():
         require(pair.digest(repo / name) == expected, "Matched training/evaluation code changed: " + name)
-    for path in (args.config, args.accelerate, args.deepspeed, pair.__file__):
+    for path in (args.config, args.accelerate, args.deepspeed):
         name = Path(path).name
         require(pair.digest(path) == protocol["launcher_sha256"][name], "Matched configuration/helper changed: " + name)
     require(Path(args.runner).resolve() == repo / (TRAIN_FILES + "run_libero_direct_60k_eval.sh"), "Wrong direct runner path")

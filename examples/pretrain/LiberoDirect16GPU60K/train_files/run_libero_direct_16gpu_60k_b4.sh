@@ -7,22 +7,22 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 : "${LAUNCHER_DIR:?Set the same shared launcher directory}"
 [[ "$NODE_RANK" =~ ^[01]$ ]] || die 'Invalid NODE_RANK'
 [[ "$RUN_ID" =~ ^libero_plus_direct_ln_16gpu_b4_60k_[A-Za-z0-9_.-]+$ ]] || die 'Invalid RUN_ID'
-REPO_DIR=/mnt/zhaoshijie/workspace/starVLA_libero_direct_ln_16gpu_60k_b4_20261107
-PYTHON_BIN=/root/miniconda3/envs/MRA/bin/python
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
+PYTHON_BIN="${PYTHON_BIN:-/root/miniconda3/envs/MRA/bin/python}"
 DRY_RUN="${DRY_RUN:-1}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
 [[ "$DRY_RUN" =~ ^[01]$ && "$SMOKE_TEST" =~ ^[01]$ ]] || die 'Invalid mode'
-RUN_ROOT_DIR=/mnt/zhaoshijie/checkpoints/starVLA
+RUN_ROOT_DIR="${RUN_ROOT_DIR:-/mnt/zhaoshijie/checkpoints/starVLA}"
 OUTPUT_DIR="$RUN_ROOT_DIR/$RUN_ID"
-EVAL_OUTPUT_DIR="/mnt/zhaoshijie/eval/starVLA/libero_plus/${RUN_ID}_final16"
-MASTER_ADDR=172.27.13.188
-MASTER_PORT=29686
-BASE_VLM=/mnt/zhaoshijie/workspace/starVLA/playground/Pretrained_models/Qwen3-VL-4B-Instruct
-REFERENCE_CONTRACT=/mnt/zhaoshijie/checkpoints/starVLA/launcher_logs/galaxea_libero_posttrain60k_20261105_contract
-ENV_OVERLAY=/mnt/zhaoshijie/checkpoints/starVLA/launcher_logs/galaxea_libero_pair_validation_20261105/sim_overlay
-LIBERO_HOME=/root/workspace/LIBERO-plus
-DATA_ROOT=/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1
-FRAME_CACHE=/mnt/zhaoshijie/frame_cache/libero_plus_stage1_256
+EVAL_OUTPUT_DIR="${EVAL_OUTPUT_DIR:-/mnt/zhaoshijie/eval/starVLA/libero_plus/${RUN_ID}_final16}"
+MASTER_ADDR="${MASTER_ADDR:-172.27.13.188}"
+MASTER_PORT="${MASTER_PORT:-29686}"
+BASE_VLM="${BASE_VLM:-/mnt/zhaoshijie/workspace/starVLA/playground/Pretrained_models/Qwen3-VL-4B-Instruct}"
+REFERENCE_CONTRACT="${REFERENCE_CONTRACT:-/mnt/zhaoshijie/checkpoints/starVLA/launcher_logs/galaxea_libero_posttrain60k_20261105_contract}"
+ENV_OVERLAY="${ENV_OVERLAY:-/mnt/zhaoshijie/checkpoints/starVLA/launcher_logs/galaxea_libero_pair_validation_20261105/sim_overlay}"
+LIBERO_HOME="${LIBERO_HOME:-/root/workspace/LIBERO-plus}"
+DATA_ROOT="${DATA_ROOT:-/mnt/zhaoshijie/dataset/_processed/libero_plus/stage1}"
+FRAME_CACHE="${FRAME_CACHE:-/mnt/zhaoshijie/frame_cache/libero_plus_stage1_256}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 TRAIN_FILES="$(dirname "$SCRIPT_PATH")"
 CONFIG_YAML="$REPO_DIR/examples/pretrain/GalaxeaLiberoMix/train_files/starvla_libero_pair_ln_60k.yaml"

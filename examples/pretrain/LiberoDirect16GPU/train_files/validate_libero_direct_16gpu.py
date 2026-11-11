@@ -23,6 +23,8 @@ REFERENCE_RUN = "/mnt/zhaoshijie/checkpoints/starVLA/libero_from_galaxea_control
 TRAIN_FILES = "examples/pretrain/LiberoDirect16GPU/train_files/"
 BASE_COMMIT = "b21b424c1d27934fda48e39ef43e1b4e507f0d9b"
 FINAL_BYTES = 16358897228
+APPROVED_HELPER = '2efaf1b77fda00adc3aebef4cce72106ea92917afd78b060ff447113d2ae0cc0'
+APPROVED_MIXTURES = 'e4546b069d91b3b65653e301c9abba4e89096e205020b0f5ce270c7039be3b18'
 require = pair.require
 
 
@@ -73,7 +75,7 @@ def compare_config(actual, expected, smoke):
     expected["trainer"]["pretrained_checkpoint"] = None
     expected["trainer"]["max_train_steps"] = 30000
     for cfg in (actual, expected):
-        for key in ("run_id", "output_dir", "config_yaml"):
+        for key in ("run_id", "run_root_dir", "output_dir", "config_yaml"):
             cfg.pop(key, None)
     if smoke:
         expected["trainer"].update(max_train_steps=3, num_warmup_steps=1, save_interval=3,
@@ -81,9 +83,19 @@ def compare_config(actual, expected, smoke):
     require(actual == expected, "Resolved config differs from matched control beyond allowed initialization/run/smoke changes")
 
 
+def assert_integrated_source_pins(repo):
+    # These reviewed additions permit DROID/Ego registration and explicit source
+    # smoke checks while retaining the original model/data/evaluation hashes.
+    require(pair.digest(pair.__file__) == APPROVED_HELPER,
+            "Integrated posttraining helper differs from the reviewed version")
+    require(pair.digest(repo / "starVLA/dataloader/gr00t_lerobot/mixtures.py") == APPROVED_MIXTURES,
+            "Dataset mixture declarations differ from the reviewed version")
+
+
 def preflight(args):
     protocol, parity = reference(args)
     repo = Path(args.repo).resolve(strict=True)
+    assert_integrated_source_pins(repo)
     cfg = pair.load_yaml(args.config)
     pair.assert_architecture(cfg)
     require(cfg == protocol["common_config"], "Common YAML differs from the completed matched pair")
@@ -91,13 +103,15 @@ def preflight(args):
             "Base VLM must be the same original Qwen3-VL source")
     status = subprocess.check_output(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"], text=True)
     require(not status.strip(), "Repository must be committed and clean: " + status)
-    changed = set(subprocess.check_output(["git", "-C", str(repo), "diff", "--name-only", BASE_COMMIT, "HEAD"], text=True).splitlines())
-    require(changed and all(name.startswith("examples/pretrain/LiberoDirect16GPU/") for name in changed),
-            "Only the new 16GPU experiment directory may differ from the baseline commit: " + str(sorted(changed)))
+    # Integrated worktrees contain other experiment directories. Keep the historical
+    # base as an ancestor and continue to pin all model/data/evaluation code below.
+    require(subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", BASE_COMMIT, "HEAD"],
+                           capture_output=True).returncode == 0,
+            "Checkout must retain the historical direct-experiment base")
     for name, expected in protocol["code_sha256"].items():
         require(pair.digest(repo / name) == expected, "Matched training/evaluation code changed: " + name)
     original_accelerate = repo / "examples/pretrain/LiberoPlus/train_files/accelerate_libero_plus_ln_8gpu.yaml"
-    for path in (args.config, original_accelerate, args.deepspeed, pair.__file__):
+    for path in (args.config, original_accelerate, args.deepspeed):
         name = Path(path).name
         require(pair.digest(path) == protocol["launcher_sha256"][name], "Matched configuration/helper changed: " + name)
     accelerator = pair.load_yaml(args.accelerate)
@@ -124,6 +138,8 @@ def preflight(args):
                 "repo_commit": subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip(),
                 "reference_commit": protocol["repo_commit"], "baseline_commit": BASE_COMMIT, "base_vlm": identity,
                 "runner_sha256": pair.digest(args.runner), "validator_sha256": pair.digest(__file__),
+                "current_helper_sha256": pair.digest(pair.__file__),
+                "reference_helper_sha256": protocol["launcher_sha256"][Path(pair.__file__).name],
                 "initialization": "original Qwen3-VL plus seed42 fresh complete action head; no robot-pretrained checkpoint"}
     if args.report:
         save(args.report, evidence)

@@ -17,7 +17,7 @@ import signal
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "run_libero_plus_16gpu.py"
-PINNED = "/mnt/zhaoshijie/workspace/starVLA_galaxea_libero_posttrain60k_20261105"
+PINNED = Path(os.environ.get("REPO_DIR", HERE.parents[3])).resolve()
 PARALLEL = "examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval"
 VERIFIER = "examples/pretrain/LiberoPlus/eval_files/verify_libero_plus_results.py"
 
@@ -37,11 +37,8 @@ def run():
     spec = importlib.util.spec_from_file_location("eval16", SCRIPT)
     evaluator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(evaluator)
-    retrieval = "from pathlib import Path\nimport json\nr=Path(" + repr(PINNED) + ")\nprint(json.dumps({n:(r/n).read_text() for n in " + repr([PARALLEL + "/task_queue.py", VERIFIER]) + "}))\n"
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "neo-bj5",
-                             "/root/miniconda3/envs/MRA/bin/python -"],
-                            input=retrieval, text=True, capture_output=True, check=True, timeout=45)
-    sources = json.loads(result.stdout)
+    sources = {name: (PINNED / name).read_text()
+               for name in [PARALLEL + "/task_queue.py", VERIFIER]}
     cases = []
     with tempfile.TemporaryDirectory(prefix="libero_eval16_cpu_") as temp:
         root = Path(temp)
@@ -365,7 +362,10 @@ def run():
             else:
                 raise AssertionError(f"Did not reject {label}")
     report = {"validated": True, "test_type": "CPU scheduler integration; no GPU inference", "cases": cases}
-    (HERE / "cpu_integration_results.json").write_text(json.dumps(report, indent=2) + "\n")
+    if os.environ.get("CPU_INTEGRATION_REPORT"):
+        target = Path(os.environ["CPU_INTEGRATION_REPORT"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 
 

@@ -26,6 +26,9 @@ def ssh(host, program, payload, timeout=180):
     return dict(host=host, returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
+CHECK_SPEC = r'''
+assert json.loads((root/"spec.json").read_text())==s,"Run specification differs from prepared snapshot"
+'''
 CHECK_PIN = r'''
 for name in ['pretrain','posttrain']:
  repo=s[name+'_repo']
@@ -54,7 +57,7 @@ for relative,content in d['files'].items():
 (root/'artifact_sha256.json').write_text(json.dumps(hashes,indent=2)+'\n')
 print(json.dumps(dict(prepared=True,control_dir=str(root),files=len(hashes))))
 '''
-DRY_RUN = PREAMBLE + CHECK_PIN + CHECK_ARTIFACT + r'''
+DRY_RUN = PREAMBLE + CHECK_SPEC + CHECK_PIN + CHECK_ARTIFACT + r'''
 rank=d['rank'];mode=d['mode'];mroot=root/mode
 preflight=[s['python_bin'],str(Path(s['artifact_dir'])/'train_files/validate_mixed16.py'),'preflight',
  '--repo',s['pretrain_repo'],'--expected-commit',s['pretrain_commit'],'--reference-run',s['reference_run'],
@@ -70,7 +73,7 @@ for phase,command,overrides in d['stages']:
  r=subprocess.run(command,env=env,text=True,capture_output=True,timeout=120)
  print(phase,r.returncode,r.stdout,r.stderr);assert r.returncode==0
 '''
-READY = PREAMBLE + CHECK_PIN + CHECK_ARTIFACT + r'''
+READY = PREAMBLE + CHECK_SPEC + CHECK_PIN + CHECK_ARTIFACT + r'''
 import xml.etree.ElementTree as ET
 rank=d['rank'];mode=d['mode'];mroot=root/mode
 assert not subprocess.check_output(['nvidia-smi','--query-compute-apps=pid','--format=csv,noheader,nounits'],timeout=20).strip(),'GPU processes are active'
@@ -85,7 +88,7 @@ assert not (mroot/f'launch_claim_node{rank}').exists(),'This node already submit
 if mode=='formal':assert json.loads((root/'smoke_success.json').read_text())['validated'] is True,'Full smoke is required'
 print(json.dumps(dict(ready=True,rank=rank,gpus=8,mode=mode)))
 '''
-LAUNCH = PREAMBLE + r'''
+LAUNCH = PREAMBLE + CHECK_SPEC + r'''
 rank=d['rank'];mode=d['mode'];mroot=root/mode;mroot.mkdir(exist_ok=True)
 (mroot/f'launch_claim_node{rank}').mkdir(exist_ok=False)
 command=[s['python_bin'],'-E','-u',str(Path(s['artifact_dir'])/'pipeline_node.py'),'--spec',str(root/'spec.json'),

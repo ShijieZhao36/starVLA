@@ -28,6 +28,8 @@ def load_module(name, path):
 pipeline = load_module('mixed16_pipeline', HERE / 'pipeline_node.py')
 gate = load_module('mixed16_post_gate', REPO / 'examples/pretrain/GalaxeaLiberoMix/train_files/validate_libero_pair_60k.py')
 make_spec = load_module('mixed16_spec', HERE / 'make_spec.py')
+with patch.object(sys, 'path', [str(HERE), *sys.path]):
+    deploy = load_module('mixed16_deploy', HERE / 'deploy.py')
 
 
 def recipe(root):
@@ -189,6 +191,30 @@ class SmokeSourceTests(unittest.TestCase):
                             env=env,capture_output=True,text=True)
         self.assertNotEqual(proc.returncode,0)
         self.assertIn('SOURCE_SMOKE_TEST requires SMOKE_TEST=1',proc.stderr)
+
+
+class PreparedSpecTests(unittest.TestCase):
+    def test_prepared_spec_matches_and_changed_local_spec_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prepared = recipe(root)
+            control = Path(prepared['control_dir']);control.mkdir()
+            (control/'spec.json').write_text(json.dumps(prepared))
+            payload = dict(spec=prepared, rank=0, mode='smoke', stages=[])
+            # Execute the same check used by remote dry-run, readiness and launch.
+            check = deploy.PREAMBLE + deploy.CHECK_SPEC
+            accepted = subprocess.run([sys.executable, '-c', check], input=json.dumps(payload),
+                                      capture_output=True, text=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            changed = dict(prepared, pretrain_commit='changed_after_prepare')
+            payload['spec'] = changed
+            for action, program in [('dry-run', deploy.DRY_RUN), ('ready', deploy.READY), ('launch', deploy.LAUNCH)]:
+                with self.subTest(action=action):
+                    rejected = subprocess.run([sys.executable, '-c', program], input=json.dumps(payload),
+                                              capture_output=True, text=True)
+                    self.assertNotEqual(rejected.returncode, 0)
+                    self.assertIn('Run specification differs from prepared snapshot', rejected.stderr)
+            self.assertEqual(json.loads((control/'spec.json').read_text()), prepared)
 
 
 class SpecTests(unittest.TestCase):

@@ -2,6 +2,7 @@
 """CPU-only regression checks for batch/step and fresh-init validation gates."""
 import ast
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -57,6 +58,38 @@ class ProtocolTests(unittest.TestCase):
             target[path[-1]] = value
             with self.subTest(path=path), self.assertRaises(ValueError):
                 compare(mutated, expected, False)
+
+    def test_output_root_can_move_without_changing_training(self):
+        compare = extracted('compare_config')['compare_config']
+        actual, expected = self.config()
+        actual['run_root_dir'] = '/isolated/integration/checkpoints'
+        expected['run_root_dir'] = '/historical/checkpoints'
+        compare(actual, expected, False)
+        actual['trainer']['learning_rate'] = 2e-4
+        with self.assertRaises(ValueError):
+            compare(actual, expected, False)
+
+    def test_reviewed_helper_and_mixture_cannot_drift(self):
+        ns = extracted('assert_integrated_source_pins')
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            helper = repo / 'helper.py'
+            mixture = repo / 'starVLA/dataloader/gr00t_lerobot/mixtures.py'
+            mixture.parent.mkdir(parents=True)
+            helper.write_text('reviewed helper')
+            mixture.write_text('reviewed mixture')
+            digest = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
+            ns.update(pair=SimpleNamespace(__file__=str(helper), digest=digest),
+                      APPROVED_HELPER=digest(helper), APPROVED_MIXTURES=digest(mixture))
+            check = ns['assert_integrated_source_pins']
+            check(repo)
+            helper.write_text('unreviewed helper')
+            with self.assertRaises(ValueError):
+                check(repo)
+            helper.write_text('reviewed helper')
+            mixture.write_text('unreviewed mixture')
+            with self.assertRaises(ValueError):
+                check(repo)
 
     def test_smoke_still_requires_batch4(self):
         compare = extracted('compare_config')['compare_config']

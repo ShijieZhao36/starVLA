@@ -3,7 +3,7 @@
 # Same training config/core/evaluation code as the completed paired experiment.
 set -Eeuo pipefail
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-REPO_DIR="${REPO_DIR:-/mnt/zhaoshijie/workspace/starVLA_libero_direct_ln_60k_20261107}"
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
 PYTHON_BIN=/root/miniconda3/envs/CRA/bin/python
 EVAL_PYTHON="$PYTHON_BIN"
 LIBERO_HOME=/root/workspace/LIBERO-plus
