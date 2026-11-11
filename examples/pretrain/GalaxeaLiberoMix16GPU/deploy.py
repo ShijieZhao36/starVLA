@@ -65,7 +65,10 @@ preflight=[s['python_bin'],str(Path(s['artifact_dir'])/'train_files/validate_mix
  '--per-device-batch-size',str(s['pretrain_per_device_batch']),'--global-batch',str(s['pretrain_global_batch']),
  '--report',str(root/f'preflight_preview_node{rank}.json')]
 if mode=='smoke':preflight+=['--smoke']
-env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES='',PYTHONPATH=s['pretrain_repo'],PYTHONDONTWRITEBYTECODE='1')
+env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES='',PYTHONPATH=s['pretrain_repo'],PYTHONDONTWRITEBYTECODE='1',
+ NCCL_SOCKET_IFNAME='eth0',GLOO_SOCKET_IFNAME='eth0',
+ NCCL_IB_HCA='=com0_0,com0_1,com0_2,com0_3,com0_4,com0_5,com0_6,com0_7',NCCL_IB_GID_INDEX='5',NCCL_CROSS_NIC='0')
+env.pop('NCCL_IB_DISABLE',None)
 r=subprocess.run(preflight,env=env,text=True,capture_output=True,timeout=120)
 print('SOURCE_PREFLIGHT',r.returncode,r.stdout,r.stderr);assert r.returncode==0
 for phase,command,overrides in d['stages']:

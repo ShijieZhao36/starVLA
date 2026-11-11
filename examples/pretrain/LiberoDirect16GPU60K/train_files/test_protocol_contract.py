@@ -5,10 +5,14 @@ import copy
 import hashlib
 import json
 import math
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / 'validate_libero_direct_16gpu_60k_b4.py'
@@ -22,7 +26,7 @@ def require(condition, message):
 
 def extracted(*names):
     selected = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in names]
-    namespace = dict(copy=copy, json=json, math=math, Path=Path, require=require,
+    namespace = dict(copy=copy, json=json, math=math, os=os, Path=Path, require=require,
                      INITIAL_MODEL='fresh-model', REFERENCE_STATS='stats', REFERENCE_PROTOCOL='protocol',
                      FINAL_BYTES=4, pair=SimpleNamespace(LIBERO='libero_plus_rot6d'), initial=lambda args: None,
                      save=lambda path, obj: Path(path).write_text(json.dumps(obj)))
@@ -125,6 +129,62 @@ class ProtocolTests(unittest.TestCase):
             (root / 'final_model/pytorch_model.pt').write_bytes(b'bad')
             with self.assertRaises(ValueError):
                 trained(args)
+
+
+class TransportTests(unittest.TestCase):
+    def check_runner_environment(self, overrides):
+        repo = ROOT.parents[3]
+        runners = [
+            (repo / 'examples/pretrain/LiberoDirect16GPU/train_files/run_libero_direct_16gpu_30k.sh',
+             'libero_plus_direct_ln_16gpu_30k_transport_smoke3'),
+            (ROOT / 'run_libero_direct_16gpu_60k_b4.sh',
+             'libero_plus_direct_ln_16gpu_b4_60k_transport_smoke3'),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            fake = directory / 'fake_python'
+            fake.write_text('#!' + sys.executable + "\nimport json,os\nfrom pathlib import Path\n" +
+                            "with Path(os.environ['ENV_TRACE']).open('a') as f:\n" +
+                            " f.write(json.dumps({k:v for k,v in os.environ.items() if k.startswith(('NCCL_', 'GLOO_'))})+'\\n')\n")
+            fake.chmod(0o755)
+            for index, (runner, run_id) in enumerate(runners):
+                trace = directory / ('trace%s.jsonl' % index)
+                env = {name: value for name, value in os.environ.items()
+                       if not name.startswith(('NCCL_', 'GLOO_'))}
+                env.update(REPO_DIR=str(repo), PYTHON_BIN=str(fake), NODE_RANK='0',
+                           RUN_ID=run_id, LAUNCHER_DIR=str(directory / ('control%s' % index)),
+                           SMOKE_TEST='1', DRY_RUN='1', ENV_TRACE=str(trace),
+                           PYTHONDONTWRITEBYTECODE='1', CUDA_VISIBLE_DEVICES='')
+                env.update(overrides)
+                result = subprocess.run(['bash', str(runner)], env=env, capture_output=True,
+                                        text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                rows = [json.loads(line) for line in trace.read_text().splitlines()]
+                self.assertEqual(len(rows), 3)
+                for row in rows:
+                    self.assertEqual(row['NCCL_IB_GID_INDEX'], overrides.get('NCCL_IB_GID_INDEX', '5'))
+                    self.assertEqual(row['NCCL_CROSS_NIC'], overrides.get('NCCL_CROSS_NIC', '0'))
+                    self.assertEqual(row['NCCL_SOCKET_IFNAME'], 'eth0')
+                    self.assertEqual(row['GLOO_SOCKET_IFNAME'], 'eth0')
+                    self.assertTrue(row['NCCL_IB_HCA'].startswith('=com0_0,'))
+                    self.assertNotIn('NCCL_IB_DISABLE', row)
+
+    def test_sanitized_parent_gets_explicit_roce_defaults(self):
+        self.check_runner_environment({})
+
+    def test_explicit_roce_overrides_remain_effective(self):
+        self.check_runner_environment({'NCCL_IB_GID_INDEX': '7', 'NCCL_CROSS_NIC': '1',
+                                       'NCCL_IB_DISABLE': '1'})
+
+    def test_transport_evidence_reports_effective_settings(self):
+        function = extracted('transport_environment')['transport_environment']
+        values = dict(NCCL_IB_GID_INDEX='5', NCCL_CROSS_NIC='0', NCCL_SOCKET_IFNAME='eth0',
+                      GLOO_SOCKET_IFNAME='eth0', NCCL_IB_HCA='=com0_0,com0_1')
+        with patch.dict(os.environ, values, clear=True):
+            report = function()
+        self.assertEqual(report, dict(values, NCCL_IB_DISABLE=None))
+        with patch.dict(os.environ, dict(values, NCCL_IB_GID_INDEX='7'), clear=True):
+            self.assertEqual(function()['NCCL_IB_GID_INDEX'], '7')
 
 
 if __name__ == '__main__':

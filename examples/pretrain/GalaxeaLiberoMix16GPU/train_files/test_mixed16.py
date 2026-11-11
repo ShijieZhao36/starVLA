@@ -70,6 +70,35 @@ class ProtocolTests(unittest.TestCase):
                 self.assertIn('--main_process_port 29715' if smoke else '--main_process_port 29716', out)
                 self.assertFalse(directory.exists())
 
+    def test_transport_defaults_do_not_depend_on_login_environment(self):
+        env = {key:value for key,value in os.environ.items() if not key.startswith(('NCCL_', 'GLOO_'))}
+        env.update(NODE_RANK='0', RUN_ID='transport_audit', LAUNCHER_DIR='/tmp/not-created',
+                   DRY_RUN='1', MASTER_ADDR='127.0.0.1')
+        command = ['bash', str(HERE / 'run_mixed_16gpu_pretrain.sh')]
+        result = subprocess.check_output(command, env=env, text=True)
+        self.assertIn('NCCL transport: gid_index=5 cross_nic=0 socket=eth0', result)
+        env.update(NCCL_IB_GID_INDEX='3', NCCL_CROSS_NIC='2')
+        overridden = subprocess.check_output(command, env=env, text=True)
+        self.assertIn('NCCL transport: gid_index=3 cross_nic=2 socket=eth0', overridden)
+
+    def test_actual_transport_environment_is_recorded_and_compared(self):
+        values = dict(NCCL_SOCKET_IFNAME='eth0', GLOO_SOCKET_IFNAME='eth0',
+                      NCCL_IB_HCA='=com0_0', NCCL_IB_GID_INDEX='5', NCCL_CROSS_NIC='0')
+        with patch.dict(os.environ, values, clear=True):
+            transport = gate.transport_environment()
+        self.assertEqual(transport, dict(values, NCCL_IB_DISABLE=None))
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name)
+            for rank in (0,1):
+                gate.atomic_json(root/f'node{rank}/preflight.json',
+                                 dict(node_rank=rank,protocol=dict(transport_env=transport)))
+            args=argparse.Namespace(launcher=str(root))
+            gate.compare(args)
+            wrong=dict(transport,NCCL_IB_GID_INDEX='4')
+            gate.atomic_json(root/'node1/preflight.json',dict(node_rank=1,protocol=dict(transport_env=wrong)))
+            with self.assertRaisesRegex(ValueError,'protocol mismatch'):
+                gate.compare(args)
+
     def test_inconsistent_cli_batch_fails_before_launch(self):
         env = dict(os.environ, NODE_RANK='0', RUN_ID='audit', LAUNCHER_DIR='/tmp/no-mutation',
                    DRY_RUN='1', PER_DEVICE_BATCH_SIZE='4', GLOBAL_BATCH='128', MASTER_ADDR='127.0.0.1')

@@ -49,6 +49,10 @@ export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TOKENIZERS_PARALLELISM=false
 export NCCL_DEBUG=WARN TORCH_NCCL_ASYNC_ERROR_HANDLING=1 NO_ALBUMENTATIONS_UPDATE=1
 export NCCL_SOCKET_IFNAME=eth0 GLOO_SOCKET_IFNAME=eth0
 export NCCL_IB_HCA='=com0_0,com0_1,com0_2,com0_3,com0_4,com0_5,com0_6,com0_7'
+# Explicit IPv4 RoCEv2 defaults for the historical bj5/bj6 cluster. The pipeline
+# clears inherited NCCL variables, so never rely on login-shell configuration.
+export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-5}" NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-0}"
+[[ "$NCCL_IB_GID_INDEX" =~ ^[0-9]+$ && "$NCCL_CROSS_NIC" =~ ^[012]$ ]] || die 'Invalid NCCL GID index or cross-NIC mode'
 unset NCCL_IB_DISABLE PRETRAINED_CHECKPOINT
 export WANDB_MODE=offline
 [[ "$SMOKE_TEST" == 0 ]] || export WANDB_MODE=disabled
@@ -69,6 +73,8 @@ gate_args=(--repo "$REPO_DIR" --run "$OUTPUT_DIR" --launcher "$LAUNCHER_DIR" --n
 [[ -z "${EXPECTED_COMMIT:-}" ]] || gate_args+=(--expected-commit "$EXPECTED_COMMIT")
 [[ -z "${REFERENCE_RUN:-}" ]] || gate_args+=(--reference-run "$REFERENCE_RUN")
 coord_args=(--run "$OUTPUT_DIR" --launcher "$LAUNCHER_DIR" --node-rank "$NODE_RANK")
+printf 'NCCL transport: gid_index=%s cross_nic=%s socket=%s hca=%s\n' \
+ "$NCCL_IB_GID_INDEX" "$NCCL_CROSS_NIC" "$NCCL_SOCKET_IFNAME" "$NCCL_IB_HCA"
 printf 'run=%s node_rank=%s world_size=16 global_batch=%s dry_run=%s smoke=%s\n' "$RUN_ID" "$NODE_RANK" "$GLOBAL_BATCH" "$DRY_RUN" "$SMOKE_TEST"
 printf 'Command: '; printf '%q ' "${train_cmd[@]}"; printf '\n'
 if [[ "$DRY_RUN" == 1 ]]; then

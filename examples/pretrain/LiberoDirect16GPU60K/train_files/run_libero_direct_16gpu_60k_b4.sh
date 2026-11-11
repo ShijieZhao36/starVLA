@@ -46,6 +46,8 @@ export PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TOKENIZERS_PARALLELISM=false
 export NCCL_DEBUG=WARN TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_SOCKET_IFNAME=eth0 GLOO_SOCKET_IFNAME=eth0
 export NCCL_IB_HCA='=com0_0,com0_1,com0_2,com0_3,com0_4,com0_5,com0_6,com0_7'
+# These RoCE settings must survive sanitized orchestration environments.
+export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-5}" NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-0}"
 unset NCCL_IB_DISABLE
 export WANDB_MODE=offline WANDB_PROJECT=pretrain WANDB_ENTITY=jasperz-georgia-institute-of-technology
 export MUJOCO_GL=egl PYOPENGL_PLATFORM=egl NO_ALBUMENTATIONS_UPDATE=1

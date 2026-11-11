@@ -29,7 +29,13 @@ MRA runtime, immutable baseline, simulation overlay and LIBERO installation;
 pass the corresponding arguments when the paths differ. Hosts must each have
 8 idle healthy GPUs and passwordless SSH. `MASTER_ADDR` must be reachable from
 both nodes. Network variables in `run_mixed_16gpu_pretrain.sh` retain this
-cluster's `eth0`/`com0_*` fabric settings.
+cluster's `eth0`/`com0_*` fabric settings. The runner explicitly defaults
+`NCCL_IB_GID_INDEX=5` (the cluster's IPv4 RoCEv2 GID) and
+`NCCL_CROSS_NIC=0`, even when the login shell has no NCCL settings. The pipeline
+continues to discard inherited NCCL variables. The actual transport environment
+is recorded in each node's preflight protocol and launch log; cross-node
+comparison rejects a mismatch. Adapt these cluster defaults before using a
+different fabric.
 
 Generate the spec **after committing all code**, outside the checkout:
 

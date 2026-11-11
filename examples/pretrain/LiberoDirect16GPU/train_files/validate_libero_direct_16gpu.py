@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -92,6 +93,13 @@ def assert_integrated_source_pins(repo):
             "Dataset mixture declarations differ from the reviewed version")
 
 
+def transport_environment():
+    """Record effective network selections after the runner sets its defaults."""
+    return {name: os.environ.get(name) for name in (
+        "NCCL_SOCKET_IFNAME", "GLOO_SOCKET_IFNAME", "NCCL_IB_HCA",
+        "NCCL_IB_GID_INDEX", "NCCL_CROSS_NIC", "NCCL_IB_DISABLE")}
+
+
 def preflight(args):
     protocol, parity = reference(args)
     repo = Path(args.repo).resolve(strict=True)
@@ -134,6 +142,7 @@ def preflight(args):
                 "steps": 3 if args.smoke else 30000, "accelerate_sha256": pair.digest(args.accelerate),
                 "reference_common_protocol_sha256": REFERENCE_PROTOCOL, "reference_evaluation_protocol_sha256": REFERENCE_EVAL,
                 "configuration_sha256": pair.digest(args.config), "training_data": data, "runtime_versions": versions,
+                "transport_environment": transport_environment(),
                 "reference_statistics_sha256": REFERENCE_STATS, "expected_initial_parameters": parity["initial_parameters"],
                 "repo_commit": subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip(),
                 "reference_commit": protocol["repo_commit"], "baseline_commit": BASE_COMMIT, "base_vlm": identity,

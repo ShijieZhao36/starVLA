@@ -28,6 +28,14 @@ EXPECTED_FILES = {
 }
 
 
+TRANSPORT_KEYS = ('NCCL_SOCKET_IFNAME', 'GLOO_SOCKET_IFNAME', 'NCCL_IB_HCA',
+                  'NCCL_IB_GID_INDEX', 'NCCL_CROSS_NIC', 'NCCL_IB_DISABLE')
+
+
+def transport_environment():
+    return {name: os.environ.get(name) for name in TRANSPORT_KEYS}
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -143,7 +151,7 @@ def preflight(args):
                    source_config_sha256=digest(repo / CONFIG_REL), deepspeed_sha256=digest(repo / DS_REL),
                    seed=42, nodes=2, world_size=16, per_device_batch_size=args.per_device_batch_size,
                    global_batch=batch_size(args.per_device_batch_size, args.global_batch),
-                   smoke=args.smoke, code_sha256=code_hashes,
+                   smoke=args.smoke, transport_env=transport_environment(), code_sha256=code_hashes,
                    launcher_sha256={name: digest(launcher / name) for name in launch_files},
                    metadata_sha256=data_hashes, reference_statistics_sha256=STATS,
                    reference_sampling_sha256=SAMPLING, base_vlm_json_sha256=base_hashes,
