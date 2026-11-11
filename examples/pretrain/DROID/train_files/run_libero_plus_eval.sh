@@ -28,7 +28,7 @@ if [[ "$SMOKE_TEST" == 1 ]]; then
 else
   eval_cmd=(bash "$EVAL_LAUNCHER")
 fi
-printf 'Command: '; printf '%q ' "${eval_cmd[@]}"; printf '\n' 
+printf 'Command: '; printf '%q ' "${eval_cmd[@]}"; printf '\n'
 if [[ "$DRY_RUN" == 1 ]]; then
   printf 'Command preview only; no model, simulator or GPU is started.\n'
   exit 0

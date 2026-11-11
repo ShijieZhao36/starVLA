@@ -28,6 +28,12 @@ Historical run directories, launch snapshots and checkpoints are not changed.
 - `GalaxeaLiberoMix/train_files/run_libero_direct_60k_eval.sh`: the existing
   one-host direct LIBERO60k baseline, with repository and output-root overrides.
 
+The retained `LiberoDirect16GPU/train_files/reference_eval_then_formal.sh`
+and `reuse_training_smoke.py` are historical recovery drivers for the original
+November 7 submission. They pin its checkout and reference checkpoints; do not
+use them to launch new experiments. Use the direct launchers above with fresh
+run IDs and explicit smoke mode for current validation.
+
 Paths above are relative to this `examples/pretrain/` directory. Run launchers
 from a committed, clean checkout. Shell entrypoints derive their repository
 from their own location or an explicit `REPO_DIR`; resources such as models,

@@ -12,7 +12,7 @@ if [[ "$REQUIRE_PAIRED_SOURCE" == 1 ]]; then
   : "${PAIRED_PRETRAIN_RUN_DIR:?Set the completed 80k run directory for the other arm}"
 fi
 [[ "$ARM" == A || "$ARM" == B ]] || die 'ARM must be A or B'
-REPO_DIR="${REPO_DIR:-/mnt/zhaoshijie/workspace/starVLA_ego50_ab_20261110_0237}"
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
 PYTHON_BIN="${PYTHON_BIN:-/root/miniconda3/envs/CRA/bin/python}"
 EVAL_PYTHON="${EVAL_PYTHON:-$PYTHON_BIN}"
 LIBERO_HOME="${LIBERO_HOME:-/root/workspace/LIBERO-plus}"
