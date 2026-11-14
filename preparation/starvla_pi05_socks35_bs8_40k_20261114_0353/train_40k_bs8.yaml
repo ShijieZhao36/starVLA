@@ -1,0 +1,71 @@
+run_id: pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_bs8_8gpu_40k_20261114
+run_root_dir: /mnt/vla-pretrain/zh1112/checkpoints/starVLA
+seed: 42
+is_debug: false
+wandb_entity: ''
+wandb_project: starvla_pi05_socks35
+framework:
+  name: PI05
+  precision: bfloat16
+  action_dim: 32
+  supervised_action_dim: 14
+  action_horizon: 50
+  max_state_dim: 32
+  discrete_state_input: true
+  max_token_len: 200
+  num_inference_steps: 10
+  image_resolution: [224, 224]
+  image_keys: [base_0_rgb, left_wrist_0_rgb, right_wrist_0_rgb]
+  tokenizer:
+    model_path: /mnt/vla-pretrain/zh1112/pi05_assets/paligemma_tokenizer.model
+    pad_state_value: -2.0
+  paligemma:
+    model_name_or_path: ''
+datasets:
+  vla_data:
+    dataset_py: gr00t_sharded
+    data_root_dir: /mnt/vla-pretrain/zh1112/dataset/training_views/socks_sft35_abs_h50_20261112
+    data_mix: socks_sft35_abs_h50
+    frame_cache_dir: /mnt/vla-pretrain/zh1112/frame_cache/socks_sft35_224_pi05_pil_20261114
+    include_state: true
+    use_percentiles: true
+    use_relative_action: false
+    canonical_layout: null
+    canonical_robots: null
+    allow_padding: false
+    per_device_batch_size: 8
+    num_workers: 2
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+    shard_size: 1024
+    episode_sampling_rate: 1.0
+trainer:
+  pretrained_checkpoint: /mnt/vla-pretrain/zh1112/pi05_assets/pi05_base_modelscope/model.safetensors
+  strict_pretrained_load: true
+  is_resume: false
+  max_train_steps: 40000
+  num_warmup_steps: 1000
+  save_interval: 5000
+  eval_interval: 100000000
+  learning_rate:
+    base: 5.0e-5
+    vlm: 5.0e-5
+    action_head: 5.0e-5
+  lr_scheduler_type: constant_with_warmup
+  scheduler_specific_kwargs: {}
+  freeze_modules: ''
+  loss_scale: {vla: 1.0}
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  logging_frequency: 100
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-8
+    weight_decay: 1.0e-10
+  save_format: pt
+  tensorboard: true
+  log_cuda_memory: true
+  audit_initial_model: false
+  audit_source_exposure: true

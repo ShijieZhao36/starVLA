@@ -1,0 +1,20 @@
+[
+  "/root/miniconda3/envs/starvla_pi05/bin/python",
+  "-m",
+  "accelerate.commands.launch",
+  "--config_file",
+  "/mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/config/deepseeds/deepspeed_zero2.yaml",
+  "--num_processes",
+  "8",
+  "--main_process_port",
+  "29852",
+  "--deepspeed_config_file",
+  "/mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/config/deepseeds/ds_config.yaml",
+  "/mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/training/train_starvla.py",
+  "--config_yaml",
+  "/mnt/vla-pretrain/zh1112/preparation/starvla_pi05_sft35_audit_20261114_0214/pi05_socks35_30k.yaml",
+  "--run_root_dir",
+  "/mnt/vla-pretrain/zh1112/checkpoints/starVLA",
+  "--run_id",
+  "pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_8gpu_30k_20261114"
+]

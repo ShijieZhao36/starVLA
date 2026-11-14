@@ -1,0 +1,143 @@
+{
+  "passed": true,
+  "repository_commit": "cefee908d71a4c1fb5cc037260a4f3d0dccb8d37",
+  "weight_load_strict": true,
+  "weight_values_checked": true,
+  "dataloader": "starVLA.dataloader.build_dataloader(gr00t_sharded)",
+  "all_35_registered": true,
+  "input_images": [
+    [
+      224,
+      224
+    ],
+    [
+      224,
+      224
+    ],
+    [
+      224,
+      224
+    ]
+  ],
+  "state_shape": [
+    1,
+    14
+  ],
+  "action_shape": [
+    50,
+    14
+  ],
+  "loss_14d": 0.2920663058757782,
+  "loss_matches_first14_mse": true,
+  "padding18_output_gradient_exactly_zero": true,
+  "gradient_norms": {
+    "VLM": 25.290306091308594,
+    "Action": 5.447301387786865
+  },
+  "model_image_processing_does_no_additional_resize": true,
+  "source_metadata_unchanged": true,
+  "dataset_fps": [
+    30
+  ],
+  "source_to_cache_pixel_checks": [
+    {
+      "subset": "lerobot_socks_v1_0924",
+      "camera": "front",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        550,
+        1100
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_0924",
+      "camera": "left_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        550,
+        1100
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_0924",
+      "camera": "right_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        550,
+        1100
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_overlap_1010night_dropframe",
+      "camera": "front",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        348,
+        696
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_overlap_1010night_dropframe",
+      "camera": "left_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        348,
+        696
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_overlap_1010night_dropframe",
+      "camera": "right_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        348,
+        696
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_random_unbentsegment_1003day",
+      "camera": "front",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        405,
+        810
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_random_unbentsegment_1003day",
+      "camera": "left_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        405,
+        810
+      ],
+      "exact": true
+    },
+    {
+      "subset": "lerobot_socks_v1_random_unbentsegment_1003day",
+      "camera": "right_wrist",
+      "episode": 0,
+      "frame_indices": [
+        0,
+        405,
+        810
+      ],
+      "exact": true
+    }
+  ]
+}

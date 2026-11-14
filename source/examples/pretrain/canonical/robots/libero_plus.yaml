@@ -1,0 +1,14 @@
+# Fill the canonical layout from LIBERO-plus stage1.
+# The dataset only has a right EEF pose and a right gripper. Every other
+# canonical slot stays zero and is masked out of the loss.
+robot_type: libero_plus_rot6d
+action:
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.gripper
+    source: right_gripper
+state:
+  - field: right.eef_pose
+    source: right_eef
+  - field: right.gripper
+    source: right_gripper

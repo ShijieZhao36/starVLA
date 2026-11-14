@@ -1,0 +1,35 @@
+{
+  "baseline_source": "/home/user/Documents/ChatGPT/pretrain\u5b9e\u9a8c/outputs/galaxea_libero_mix_20261105/posttrain60k_20261105/train_files",
+  "adapted_files": {
+    "run_libero_pair_60k_eval.sh": "run_libero_ego50_60k_eval.sh",
+    "validate_libero_pair_60k.py": "validate_libero_ego50_60k.py",
+    "starvla_libero_pair_ln_60k.yaml": "starvla_libero_ego50_ln_60k.yaml"
+  },
+  "source_mix": {
+    "A": "galaxea_libero_ego50_A",
+    "B": "galaxea_libero_ego50_B"
+  },
+  "source_stats_tags": [
+    "galaxea_r1lite_stage1",
+    "libero_plus_rot6d",
+    "xperience_human"
+  ],
+  "config_sha256": "1f10135858d2c80c9114a8f1d952b6744c3c81cc3248fc2bd7ad6c79492ef274",
+  "configuration_byte_identical_to_baseline": true,
+  "default_start_policy": "independent_own_completed_80k",
+  "eval_protocol_unchanged": true,
+  "evaluation_count": 10030,
+  "trials_per_task": 1,
+  "total_execution_error_attempts": 3,
+  "posttrain_steps": 60000,
+  "eval_checkpoint": "final_model/pytorch_model.pt",
+  "runtime_preflight": "../eval_design/neo-bj{1,4}_eval_env.json",
+  "runtime": "MRA",
+  "tests_passed": 13,
+  "bash_syntax_check": "passed",
+  "eval_shell_section_byte_identical": true,
+  "eval_protocol_function_byte_identical": true,
+  "remote_eval_source_hashes_equal": true,
+  "smoke_source_steps": 3,
+  "formal_source_steps": 80000
+}

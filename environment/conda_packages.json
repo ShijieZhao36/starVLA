@@ -1,0 +1,1010 @@
+[
+  {
+    "name": "_libgcc_mutex",
+    "version": "0.1",
+    "build_string": "main",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "_openmp_mutex",
+    "version": "5.1",
+    "build_string": "52_gnu",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "absl-py",
+    "version": "2.5.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "accelerate",
+    "version": "1.5.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "accumulation-tree",
+    "version": "0.6.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "albucore",
+    "version": "0.0.17",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "albumentations",
+    "version": "1.4.18",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "annotated-types",
+    "version": "0.8.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "antlr4-python3-runtime",
+    "version": "4.9.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "anyio",
+    "version": "4.14.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "av",
+    "version": "12.3.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "bzip2",
+    "version": "1.0.8",
+    "build_string": "h5eee18b_6",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "ca-certificates",
+    "version": "2026.8.13",
+    "build_string": "h06a4308_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "certifi",
+    "version": "2026.7.22",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "3.5.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "click",
+    "version": "8.5.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "contourpy",
+    "version": "1.3.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "cramjam",
+    "version": "2.11.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "cycler",
+    "version": "0.12.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "decord",
+    "version": "0.6.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "deepspeed",
+    "version": "0.16.9",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "diffusers",
+    "version": "0.39.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "docstring-parser",
+    "version": "0.18.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "einops",
+    "version": "0.8.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "eva-decord",
+    "version": "0.6.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "eval-type-backport",
+    "version": "0.4.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "exceptiongroup",
+    "version": "1.3.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "fastparquet",
+    "version": "2024.11.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "filelock",
+    "version": "3.32.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "flash-attn",
+    "version": "2.8.3.post1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "fonttools",
+    "version": "4.63.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "fsspec",
+    "version": "2026.7.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "fvcore",
+    "version": "0.1.5.post20221221",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "gevent",
+    "version": "26.8.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "greenlet",
+    "version": "3.5.5",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "grpcio",
+    "version": "1.83.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "h11",
+    "version": "0.16.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "hf-xet",
+    "version": "1.6.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "hjson",
+    "version": "3.1.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "httpcore",
+    "version": "1.0.9",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "httpx",
+    "version": "0.28.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "huggingface-hub",
+    "version": "0.36.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "idna",
+    "version": "3.19",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "imageio",
+    "version": "2.37.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "importlib-metadata",
+    "version": "9.0.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "inquirerpy",
+    "version": "0.3.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "iopath",
+    "version": "0.1.10",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "jinja2",
+    "version": "3.1.6",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "kiwisolver",
+    "version": "1.5.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "lazy-loader",
+    "version": "0.5",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "ld_impl_linux-64",
+    "version": "2.44",
+    "build_string": "h9e0c5a2_3",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libexpat",
+    "version": "2.8.2",
+    "build_string": "h7354ed3_1",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libffi",
+    "version": "3.4.8",
+    "build_string": "h06d3fd0_3",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libgcc",
+    "version": "15.2.0",
+    "build_string": "h69a1729_8",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libgcc-ng",
+    "version": "15.2.0",
+    "build_string": "h166f726_8",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libnsl",
+    "version": "2.0.0",
+    "build_string": "h5eee18b_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libstdcxx",
+    "version": "15.2.0",
+    "build_string": "h39759b7_8",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libuuid",
+    "version": "1.41.5",
+    "build_string": "h5eee18b_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libxcb",
+    "version": "1.17.0",
+    "build_string": "h9b100fa_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "libzlib",
+    "version": "1.3.2",
+    "build_string": "h47b2149_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "markdown",
+    "version": "3.10.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "markdown-it-py",
+    "version": "4.2.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "markupsafe",
+    "version": "3.0.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "matplotlib",
+    "version": "3.10.9",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "mdurl",
+    "version": "0.1.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "mpmath",
+    "version": "1.3.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "msgpack",
+    "version": "1.2.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "ncurses",
+    "version": "6.6",
+    "build_string": "hfaaeb4e_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "networkx",
+    "version": "3.4.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "ninja",
+    "version": "1.13.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "numpy",
+    "version": "1.26.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "numpydantic",
+    "version": "1.6.9",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cublas-cu12",
+    "version": "12.4.5.8",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cuda-cupti-cu12",
+    "version": "12.4.127",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cuda-nvrtc-cu12",
+    "version": "12.4.127",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cuda-runtime-cu12",
+    "version": "12.4.127",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cudnn-cu12",
+    "version": "9.1.0.70",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cufft-cu12",
+    "version": "11.2.1.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-curand-cu12",
+    "version": "10.3.5.147",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cusolver-cu12",
+    "version": "11.6.1.9",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cusparse-cu12",
+    "version": "12.3.1.170",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-cusparselt-cu12",
+    "version": "0.6.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-nccl-cu12",
+    "version": "2.21.5",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-nvjitlink-cu12",
+    "version": "12.4.127",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "nvidia-nvtx-cu12",
+    "version": "12.4.127",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "omegaconf",
+    "version": "2.3.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "opencv-python-headless",
+    "version": "4.11.0.86",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "openssl",
+    "version": "3.5.7",
+    "build_string": "h1b28b03_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "opentelemetry-api",
+    "version": "1.44.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "packaging",
+    "version": "26.3",
+    "build_string": "py310h06a4308_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "pandas",
+    "version": "2.3.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pfzy",
+    "version": "0.3.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pillow",
+    "version": "12.3.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pip",
+    "version": "26.2.1",
+    "build_string": "pyhc872135_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "pipablepytorch3d",
+    "version": "0.7.6",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "platformdirs",
+    "version": "4.11.5",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "portalocker",
+    "version": "4.3.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "prompt-toolkit",
+    "version": "3.0.53",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "protobuf",
+    "version": "7.36.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "psutil",
+    "version": "7.2.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pthread-stubs",
+    "version": "0.3",
+    "build_string": "h47b2149_2",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "py-cpuinfo",
+    "version": "9.0.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pyarrow",
+    "version": "14.0.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pydantic",
+    "version": "2.10.6",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pydantic-core",
+    "version": "2.27.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pygments",
+    "version": "2.21.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pyparsing",
+    "version": "3.3.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "python",
+    "version": "3.10.21",
+    "build_string": "h17756b0_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pytz",
+    "version": "2026.3.post1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pyudorandom",
+    "version": "1.0.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pyyaml",
+    "version": "6.0.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "pyzmq",
+    "version": "27.2.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "qwen-vl-utils",
+    "version": "0.0.14",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "readline",
+    "version": "8.3",
+    "build_string": "hc2a1206_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "regex",
+    "version": "2026.7.19",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "requests",
+    "version": "2.34.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "rich",
+    "version": "15.0.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "safetensors",
+    "version": "0.8.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "scikit-image",
+    "version": "0.25.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "scipy",
+    "version": "1.15.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "sentencepiece",
+    "version": "0.2.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "sentry-sdk",
+    "version": "2.68.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "setuptools",
+    "version": "80.9.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "six",
+    "version": "1.17.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "sqlite",
+    "version": "3.53.2",
+    "build_string": "h795bf6d_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "starvla",
+    "version": "1.0.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "sympy",
+    "version": "1.13.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tabulate",
+    "version": "0.10.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tdigest",
+    "version": "0.5.2.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tensorboard",
+    "version": "2.21.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tensorboard-data-server",
+    "version": "0.7.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "termcolor",
+    "version": "3.3.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tifffile",
+    "version": "2025.5.10",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tiktoken",
+    "version": "0.14.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "timm",
+    "version": "1.0.29",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tk",
+    "version": "8.6.15",
+    "build_string": "h54e0aa7_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "tokenizers",
+    "version": "0.22.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "torch",
+    "version": "2.6.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "torchcodec",
+    "version": "0.2.1+cu124",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "torchvision",
+    "version": "0.21.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tqdm",
+    "version": "4.70.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "transformers",
+    "version": "4.57.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "transformers-stream-generator",
+    "version": "0.0.4",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "triton",
+    "version": "3.2.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "typeguard",
+    "version": "4.6.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "typing-extensions",
+    "version": "4.16.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tyro",
+    "version": "1.0.16",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "tzdata",
+    "version": "2026.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "urllib3",
+    "version": "2.7.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "wandb",
+    "version": "0.29.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "wcwidth",
+    "version": "0.8.3",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "websocket",
+    "version": "0.2.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "websocket-client",
+    "version": "1.8.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "websockets",
+    "version": "16.1.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "werkzeug",
+    "version": "3.1.8",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "wheel",
+    "version": "0.47.0",
+    "build_string": "py310h06a4308_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "xorg-libx11",
+    "version": "1.8.13",
+    "build_string": "h65de747_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "xorg-libxau",
+    "version": "1.0.12",
+    "build_string": "h9b100fa_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "xorg-libxdmcp",
+    "version": "1.1.5",
+    "build_string": "h9b100fa_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "xorg-xorgproto",
+    "version": "2025.1",
+    "build_string": "h47b2149_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "xxhash",
+    "version": "4.0.1",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "xz",
+    "version": "5.8.2",
+    "build_string": "h448239c_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "yacs",
+    "version": "0.1.8",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "zipp",
+    "version": "4.1.0",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "zlib",
+    "version": "1.3.2",
+    "build_string": "h47b2149_0",
+    "channel": "pkgs/main"
+  },
+  {
+    "name": "zope-event",
+    "version": "6.2",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  },
+  {
+    "name": "zope-interface",
+    "version": "8.6",
+    "build_string": "pypi_0",
+    "channel": "pypi"
+  }
+]

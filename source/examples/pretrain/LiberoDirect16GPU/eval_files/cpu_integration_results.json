@@ -1,0 +1,118 @@
+{
+  "validated": true,
+  "test_type": "CPU scheduler integration; no GPU inference",
+  "cases": [
+    {
+      "case": "cleanup_exited_leader_descendant_and_preserve_unrelated_group",
+      "passed": true
+    },
+    {
+      "case": "dry_run_allows_missing_future_checkpoint_without_output",
+      "passed": true
+    },
+    {
+      "case": "renderer_map_defaults_to_identity_and_rejects_invalid_input",
+      "passed": true
+    },
+    {
+      "case": "smoke_simulator_override_restricted_to_smoke_and_choices",
+      "passed": true
+    },
+    {
+      "case": "real_launch_rejects_missing_checkpoint",
+      "passed": true
+    },
+    {
+      "case": "dry_run_rejects_existing_empty_checkpoint",
+      "passed": true
+    },
+    {
+      "case": "smoke16",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 16,
+      "workers": 16,
+      "suite_counts": {
+        "libero_10": 4,
+        "libero_goal": 4,
+        "libero_object": 4,
+        "libero_spatial": 4
+      }
+    },
+    {
+      "case": "smoke64_renderer_override",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 64,
+      "workers": 64,
+      "suite_counts": {
+        "libero_10": 16,
+        "libero_goal": 16,
+        "libero_object": 16,
+        "libero_spatial": 16
+      }
+    },
+    {
+      "case": "full10030",
+      "passed": true,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "episodes": 10030,
+      "workers": 64,
+      "suite_counts": {
+        "libero_10": 2519,
+        "libero_goal": 2591,
+        "libero_object": 2518,
+        "libero_spatial": 2402
+      }
+    },
+    {
+      "case": "episode_error",
+      "passed": true,
+      "exit_codes": [
+        1,
+        1
+      ]
+    },
+    {
+      "case": "diagnostic_observer_preserves_action_identity_return_values_and_rng",
+      "passed": true
+    },
+    {
+      "case": "single_task_diagnostic_original_queue_worker_integration",
+      "passed": true
+    },
+    {
+      "case": "diagnostic_captures_native_abort_and_named_worker_evidence",
+      "passed": true
+    },
+    {
+      "case": "diagnostic_renderer_override_preserves_policy_gpu",
+      "passed": true
+    },
+    {
+      "case": "reject_missing",
+      "passed": true
+    },
+    {
+      "case": "reject_duplicate",
+      "passed": true
+    },
+    {
+      "case": "reject_execution_error",
+      "passed": true
+    },
+    {
+      "case": "reject_repeated_attempt",
+      "passed": true
+    }
+  ]
+}

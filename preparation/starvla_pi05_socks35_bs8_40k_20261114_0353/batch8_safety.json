@@ -1,0 +1,109 @@
+{
+  "safe": false,
+  "test_steps": 20,
+  "per_device_batch": 8,
+  "global_batch": 64,
+  "minimum_estimated_headroom_gib": 6.27642822265625,
+  "criterion": "all ranks completed training and save, finite losses; >=8 GiB headroom",
+  "maximum_peak_allocated_gib": 56.87078380584717,
+  "maximum_peak_reserved_gib": 66.841796875,
+  "last_test_loss": 0.055947478860616684,
+  "ranks": [
+    {
+      "rank": 0,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 67744301056,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 67744301056,
+      "device_free_bytes": 10866458624,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 74162700288,
+      "estimated_headroom_bytes": 10866458624
+    },
+    {
+      "rank": 1,
+      "step": 20,
+      "peak_allocated_bytes": 61063372288,
+      "peak_reserved_bytes": 71770832896,
+      "allocated_bytes": 12726124544,
+      "reserved_bytes": 71770832896,
+      "device_free_bytes": 6739263488,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 78289895424,
+      "estimated_headroom_bytes": 6739263488
+    },
+    {
+      "rank": 2,
+      "step": 20,
+      "peak_allocated_bytes": 61064539136,
+      "peak_reserved_bytes": 70355255296,
+      "allocated_bytes": 12726124544,
+      "reserved_bytes": 70355255296,
+      "device_free_bytes": 8154841088,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 76874317824,
+      "estimated_headroom_bytes": 8154841088
+    },
+    {
+      "rank": 3,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 67807215616,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 67807215616,
+      "device_free_bytes": 10702880768,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 74326278144,
+      "estimated_headroom_bytes": 10702880768
+    },
+    {
+      "rank": 4,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69730304000,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69730304000,
+      "device_free_bytes": 8779792384,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 76249366528,
+      "estimated_headroom_bytes": 8779792384
+    },
+    {
+      "rank": 5,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69560434688,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69560434688,
+      "device_free_bytes": 8949661696,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 76079497216,
+      "estimated_headroom_bytes": 8949661696
+    },
+    {
+      "rank": 6,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69619154944,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69619154944,
+      "device_free_bytes": 8890941440,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 76138217472,
+      "estimated_headroom_bytes": 8890941440
+    },
+    {
+      "rank": 7,
+      "step": 20,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69623349248,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69623349248,
+      "device_free_bytes": 9390063616,
+      "device_total_bytes": 85029158912,
+      "estimated_peak_device_used_bytes": 75639095296,
+      "estimated_headroom_bytes": 9390063616
+    }
+  ]
+}

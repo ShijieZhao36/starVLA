@@ -1,0 +1,34 @@
+{
+  "baseline_config": "/mnt/zhaoshijie/workspace/starVLA_ego50_ab_20261110_0237/examples/pretrain/GalaxeaLiberoMix/train_files/starvla_mixed_ln_80k.yaml",
+  "baseline_sha256": "a99029484931a2792c80b0902feeecc335bd925591988d03fa9aa8cdc9301ec1",
+  "mixture_patch": {
+    "already_applied": false,
+    "before_sha256": "36e907cffbaa26d35421a61c10796097072fbd3f830f74dc427dabdd11d4f244",
+    "after_sha256": "e4546b069d91b3b65653e301c9abba4e89096e205020b0f5ce270c7039be3b18"
+  },
+  "outputs": {
+    "A": {
+      "config": "/mnt/zhaoshijie/workspace/starVLA_ego50_ab_20261110_0237/examples/pretrain/Ego50AB/train_files/pretrain_A.yaml",
+      "sha256": "09f7d28e7e67e5a9ac6f0c73bcd3089da3d0f3a0cba1031052391d403072d6a3",
+      "run_id": "ego50_a_ln_8gpu_pre80k_20261110_0237",
+      "mix": "galaxea_libero_ego50_A",
+      "source_fractions": {
+        "galaxea_open_world_stage1": 0.3,
+        "libero_plus_stage1": 0.2,
+        "xperience_hours100": 0.5
+      }
+    },
+    "B": {
+      "config": "/mnt/zhaoshijie/workspace/starVLA_ego50_ab_20261110_0237/examples/pretrain/Ego50AB/train_files/pretrain_B.yaml",
+      "sha256": "da29738b8b4bcea97681195ec1c38c3c9ea3621794230d80f3e05240b15492e3",
+      "run_id": "ego50_b_ln_8gpu_pre80k_20261110_0237",
+      "mix": "galaxea_libero_ego50_B",
+      "source_fractions": {
+        "galaxea_open_world_stage1": 0.4,
+        "libero_plus_stage1": 0.1,
+        "xperience_hours100": 0.5
+      }
+    }
+  },
+  "preserved": "baseline sampler, source-internal weights, statistics, processor, model, loss and trainer"
+}

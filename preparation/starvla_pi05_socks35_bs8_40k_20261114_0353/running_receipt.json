@@ -1,0 +1,124 @@
+{
+  "status": "formal_training_running_verified",
+  "captured_at": "2026-11-14T04:08:27.552326+08:00",
+  "latest_step": 246,
+  "max_steps": 40000,
+  "per_device_batch": 8,
+  "gpu_count": 8,
+  "gradient_accumulation": 1,
+  "global_batch": 64,
+  "from_original_pi05_base": true,
+  "resume": false,
+  "training_pid": 223352,
+  "command": "/root/miniconda3/envs/starvla_pi05/bin/python -m accelerate.commands.launch --config_file /mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 --main_process_port 29862 --deepspeed_config_file /mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/config/deepseeds/ds_config.yaml /mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114/starVLA/training/train_starvla.py --config_yaml /mnt/vla-pretrain/zh1112/preparation/starvla_pi05_socks35_bs8_40k_20261114_0353/train_40k_bs8.yaml --run_root_dir /mnt/vla-pretrain/zh1112/checkpoints/starVLA --run_id pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_bs8_8gpu_40k_20261114",
+  "metrics": {
+    "loss/action_fm": {
+      "step": 200,
+      "value": 0.04609280824661255
+    },
+    "learning_rate/vlm": {
+      "step": 200,
+      "value": 9.950000276148785e-06
+    },
+    "learning_rate/action_head": {
+      "step": 200,
+      "value": 9.950000276148785e-06
+    },
+    "source_exposure/cumulative_examples": {
+      "step": 200,
+      "value": 12800.0
+    },
+    "timing/model": {
+      "step": 200,
+      "value": 0.521581768989563
+    }
+  },
+  "memory_by_rank": [
+    {
+      "rank": 0,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 67744301056,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 67744301056,
+      "device_free_bytes": 10866458624,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 1,
+      "step": 200,
+      "peak_allocated_bytes": 61063372288,
+      "peak_reserved_bytes": 71770832896,
+      "allocated_bytes": 12726124544,
+      "reserved_bytes": 71770832896,
+      "device_free_bytes": 6739263488,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 2,
+      "step": 200,
+      "peak_allocated_bytes": 61064539136,
+      "peak_reserved_bytes": 70355255296,
+      "allocated_bytes": 12726124544,
+      "reserved_bytes": 70355255296,
+      "device_free_bytes": 8154841088,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 3,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 67807215616,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 67807215616,
+      "device_free_bytes": 10702880768,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 4,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69730304000,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69730304000,
+      "device_free_bytes": 8779792384,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 5,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69560434688,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69560434688,
+      "device_free_bytes": 8949661696,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 6,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69619154944,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69619154944,
+      "device_free_bytes": 8890941440,
+      "device_total_bytes": 85029158912
+    },
+    {
+      "rank": 7,
+      "step": 200,
+      "peak_allocated_bytes": 61063419392,
+      "peak_reserved_bytes": 69623349248,
+      "allocated_bytes": 12726171648,
+      "reserved_bytes": 69623349248,
+      "device_free_bytes": 9390063616,
+      "device_total_bytes": 85029158912
+    }
+  ],
+  "allocator": "native default; no extra allocator tuning",
+  "configuration": "/mnt/vla-pretrain/zh1112/checkpoints/starVLA/pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_bs8_8gpu_40k_20261114/config.full.yaml",
+  "train_log": "/mnt/vla-pretrain/zh1112/checkpoints/starVLA/pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_bs8_8gpu_40k_20261114/train.log",
+  "tensorboard": "/mnt/vla-pretrain/zh1112/checkpoints/starVLA/pi05_socks35_abs_h50_state14_mask14_pil224_lr5e5_bs8_8gpu_40k_20261114/tensorboard",
+  "old_run_stopped_step": 5782,
+  "old_run_saved_checkpoint_step": 5000
+}

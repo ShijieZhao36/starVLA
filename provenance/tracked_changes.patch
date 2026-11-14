@@ -1,0 +1,197 @@
+diff --git a/starVLA/model/framework/VLM4A/PI0.py b/starVLA/model/framework/VLM4A/PI0.py
+index f7cb432..c52034d 100644
+--- a/starVLA/model/framework/VLM4A/PI0.py
++++ b/starVLA/model/framework/VLM4A/PI0.py
+@@ -44,6 +44,7 @@ class PI0DefaultConfig:
+     precision: Literal["bfloat16", "float32"] = "bfloat16"
+ 
+     action_dim: int = 32
++    supervised_action_dim: int | None = None
+     action_horizon: int = 50
+     max_state_dim: int = 32
+     discrete_state_input: bool = False
+@@ -181,6 +182,9 @@ class PI0(baseframework):
+         self.discrete_state_input = bool(self.config.framework.discrete_state_input)
+ 
+         self.action_dim = int(self.config.framework.action_dim)
++        self.supervised_action_dim = int(self.config.framework.supervised_action_dim or self.action_dim)
++        if not 0 < self.supervised_action_dim <= self.action_dim:
++            raise ValueError("supervised_action_dim must be between 1 and action_dim")
+         self.action_horizon = int(self.config.framework.action_horizon)
+         self.max_state_dim = int(self.config.framework.max_state_dim)
+         self.num_inference_steps = int(self.config.framework.num_inference_steps)
+@@ -435,7 +439,12 @@ class PI0(baseframework):
+             adarms_cond=adarms_cond,
+         )
+         v_t = self.action_head.decode_action_velocity(suffix_out)
+-        out = {"v_t": v_t, "action_loss": F.mse_loss(u_t, v_t, reduction="none").mean()}
++        # Compact robot actions occupy the leading dimensions; optional padding
++        # dimensions do not represent robot targets for this configuration.
++        out = {"v_t": v_t, "action_loss": F.mse_loss(
++            u_t[..., :self.supervised_action_dim],
++            v_t[..., :self.supervised_action_dim], reduction="mean",
++        )}
+         if return_debug:
+             out.update({"u_t": u_t, "x_t": x_t, "time": time, "noise": noise})
+         return out
+diff --git a/starVLA/training/train_starvla.py b/starVLA/training/train_starvla.py
+index 5c33bf1..b97d548 100644
+--- a/starVLA/training/train_starvla.py
++++ b/starVLA/training/train_starvla.py
+@@ -157,6 +157,7 @@ class VLATrainer(TrainerUtils):
+ 
+         self.completed_steps = 0
+         self.total_batch_size = self._calculate_total_batch_size()
++        self.tensorboard_writer = None
+         self.source_exposure_audit = (
+             SourceExposureAudit() if getattr(cfg.trainer, "audit_source_exposure", False) else None
+         )
+@@ -206,6 +207,9 @@ class VLATrainer(TrainerUtils):
+             )
+ 
+         self._init_wandb()
++        if self.accelerator.is_main_process and getattr(self.config.trainer, "tensorboard", False):
++            from torch.utils.tensorboard import SummaryWriter
++            self.tensorboard_writer = SummaryWriter(str(Path(self.config.output_dir) / "tensorboard"))
+ 
+     def _calculate_total_batch_size(self):
+         """Calculate global batch size."""
+@@ -349,6 +353,13 @@ class VLATrainer(TrainerUtils):
+         """Record training metrics."""
+         rank = dist.get_rank() if dist.is_initialized() else 0
+         should_log = self.completed_steps % self.config.trainer.logging_frequency == 0
++        if should_log:
++            loss = torch.tensor(float(metrics["action_dit_loss"]), device=self.accelerator.device)
++            if dist.is_initialized():
++                dist.all_reduce(loss, op=dist.ReduceOp.SUM)
++                loss /= dist.get_world_size()
++            metrics["loss/action_fm"] = float(loss)
++            metrics["loss/total"] = float(loss)
+         if self.source_exposure_audit is not None:
+             # This branch executes on ALL ranks, before rank-0-only output. Do not
+             # emit repeated step records during gradient accumulation. Flush the
+@@ -363,7 +374,8 @@ class VLATrainer(TrainerUtils):
+             last_lrs = self.lr_scheduler.get_last_lr()
+             for i, group in enumerate(self.optimizer.param_groups):
+                 group_name = group.get("name", str(i))
+-                metrics[f"learning_rate/{group_name}"] = last_lrs[i] if i < len(last_lrs) else last_lrs[-1]
++                metrics[f"learning_rate/{group_name}"] = metrics.pop(f"learning_rate_used/{group_name}")
++                metrics[f"learning_rate_next/{group_name}"] = last_lrs[i] if i < len(last_lrs) else last_lrs[-1]
+             try:
+                 dataloader_length = len(self.vla_train_dataloader)
+             except TypeError:
+@@ -380,6 +392,11 @@ class VLATrainer(TrainerUtils):
+                     self._wandb_enabled = False
+                     logger.warning(f"W&B log failed; disabling W&B: {exc}")
+             logger.info(f"Step {self.completed_steps}, Loss: {metrics})")
++            if self.tensorboard_writer is not None:
++                for key, value in metrics.items():
++                    if isinstance(value, (int, float)):
++                        self.tensorboard_writer.add_scalar(key, value, self.completed_steps)
++                self.tensorboard_writer.flush()
+ 
+     def _create_data_iterators(self):
+         """Create data iterators."""
+@@ -450,12 +467,23 @@ class VLATrainer(TrainerUtils):
+         if step_metrics is None:
+             step_metrics = {}
+         examples = self._get_next_batch()
+-        output_dict = self.accelerator.unwrap_model(self.model).predict_action(
+-            examples=examples, use_ddim=True, num_ddim_steps=20
+-        )
++        unwrapped = self.accelerator.unwrap_model(self.model)
++        was_training = unwrapped.training
++        try:
++            unwrapped.eval()
++            with torch.inference_mode():
++                output_dict = unwrapped.predict_action(examples=examples)
++        finally:
++            unwrapped.train(was_training)
++        predictions = output_dict["normalized_actions"]
++        if str(self.config.framework.name).upper() in {"PI0", "PI05"}:
++            target_dim = examples[0]["action"].shape[-1]
++            if target_dim != unwrapped.supervised_action_dim:
++                raise ValueError("PI action probe dimensions differ from supervised action dimensions")
++            predictions = predictions[..., :target_dim]
+ 
+         if self.accelerator.is_main_process:
+-            step_metrics.update(compute_action_metrics(output_dict["normalized_actions"], examples))
++            step_metrics.update(compute_action_metrics(predictions, examples))
+ 
+         del examples
+         if dist.is_initialized():
+@@ -473,6 +501,8 @@ class VLATrainer(TrainerUtils):
+ 
+     def _train_step(self, batch_vla, batch_vlm=None):
+         """Execute single training step."""
++        used_lrs = {f"learning_rate_used/{group.get('name', str(i))}": float(group['lr'])
++                    for i, group in enumerate(self.optimizer.param_groups)}
+         with self.accelerator.accumulate(self.model):
+             self.optimizer.zero_grad()
+ 
+@@ -499,12 +529,38 @@ class VLATrainer(TrainerUtils):
+             if self.accelerator.sync_gradients:
+                 self.lr_scheduler.step()
+ 
+-        return {
++        metrics = {
+             "action_dit_loss": action_loss.item(),
++            **used_lrs,
+         }
++        if getattr(self.config.trainer, "log_cuda_memory", False) and (
++            self.completed_steps == 0
++            or (self.completed_steps + 1) % self.config.trainer.logging_frequency == 0
++        ):
++            rank = dist.get_rank() if dist.is_initialized() else 0
++            device = self.accelerator.device
++            free_bytes, total_bytes = torch.cuda.mem_get_info(device)
++            memory = {
++                "rank": rank, "step": self.completed_steps + 1,
++                "peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
++                "peak_reserved_bytes": torch.cuda.max_memory_reserved(device),
++                "allocated_bytes": torch.cuda.memory_allocated(device),
++                "reserved_bytes": torch.cuda.memory_reserved(device),
++                "device_free_bytes": free_bytes, "device_total_bytes": total_bytes,
++            }
++            target = Path(self.config.output_dir) / f"cuda_memory_rank{rank}.json"
++            temporary = target.with_suffix(".json.tmp")
++            temporary.write_text(json.dumps(memory, indent=2) + "\n")
++            os.replace(temporary, target)
++            if rank == 0:
++                metrics["memory/rank0_peak_allocated_gib"] = memory["peak_allocated_bytes"] / 2**30
++                metrics["memory/rank0_peak_reserved_gib"] = memory["peak_reserved_bytes"] / 2**30
++        return metrics
+ 
+     def _finalize_training(self):
+         """Training end processing."""
++        if self.tensorboard_writer is not None:
++            self.tensorboard_writer.close()
+         if self.accelerator.is_main_process:
+             save_format = getattr(self.config.trainer, "save_format", "pt")
+             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
+diff --git a/starVLA/training/trainer_utils/trainer_tools.py b/starVLA/training/trainer_utils/trainer_tools.py
+index e008217..6e84546 100644
+--- a/starVLA/training/trainer_utils/trainer_tools.py
++++ b/starVLA/training/trainer_utils/trainer_tools.py
+@@ -138,7 +138,7 @@ def build_param_lr_groups(model, cfg):
+                 param_groups.append({"params": params, "lr": lr, "name": module_name})
+                 used_params.update(id(p) for p in params)
+         except AttributeError:
+-            ReferenceError(f"⚠️ module path `{module_name}` not found in vla")
++            raise ValueError(f"Learning-rate module path `{module_name}` not found in model")
+ 
+     # assign base learning rate to the remaining unused parameters (exclude frozen ones)
+     other_params = [p for p in model.parameters() if id(p) not in used_params and id(p) not in frozen_params]
+@@ -276,6 +276,12 @@ class TrainerUtils:
+         except Exception as e:
+             raise RuntimeError(f"❌ loading checkpoint failed: {e}")
+ 
++        # Normalize upstream OpenPI/LeRobot checkpoint names before strict
++        # loading; otherwise a PI checkpoint can silently load no parameters.
++        normalizer = getattr(model, "_normalize_state_dict", None)
++        if callable(normalizer):
++            checkpoint = normalizer(checkpoint)
++
+         loaded_modules = []
+ 
+         if reload_modules:  # partial load

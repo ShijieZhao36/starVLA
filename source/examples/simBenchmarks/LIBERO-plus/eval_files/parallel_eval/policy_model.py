@@ -1,0 +1,515 @@
+import importlib.util
+import os
+from collections import deque
+from pathlib import Path
+from typing import Dict, Optional, Sequence
+
+import cv2 as cv
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.spatial.transform import Rotation
+
+from gr00t.data.state_action.pose import EndEffectorPose
+from gr00t.data.types import ActionFormat
+from starVLA.dataloader.canonical_layout import load_layout, load_robot_maps
+from starVLA.dataloader.gr00t_sharded import data_config_to_gr00t_modality_configs
+from starVLA.dataloader.gr00t_sharded_processor import StarVLAPackProcessor
+from starVLA.model.framework.base_framework import baseframework
+from starVLA.model.tools import read_mode_config
+
+# stage1 conversion_report.json: controller xyz * 0.05 m, axis-angle * 0.5 rad.
+_ROT6D_POSITION_SCALE_M = 0.05
+_ROT6D_ROTATION_SCALE_RAD = 0.5
+_CANONICAL_LAYOUT = "examples/pretrain/canonical/bimanual_v1.yaml"
+_CANONICAL_ROBOTS = "examples/pretrain/canonical/robots"
+_CANONICAL_ROBOT_TYPE = "libero_plus_rot6d"
+_CANONICAL_ACTION_DIM = 90
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import torch
+
+
+def _split_flat_action_stats(flat: dict, keys: list[str], dims: list[int]) -> dict[str, dict[str, np.ndarray]]:
+    """Slice a concatenated action-stats vector back into per-key groups."""
+    grouped = {key: {} for key in keys}
+    names = [name for name in ("min", "max", "mean", "std", "q01", "q99") if name in flat]
+    if not names:
+        raise KeyError(f"action stats are missing min/max/q01/q99 fields: {list(flat)}")
+    for name in names:
+        values = np.asarray(flat[name], dtype=np.float64)
+        offset = 0
+        for key, dim in zip(keys, dims):
+            grouped[key][name] = values[..., offset : offset + dim]
+            offset += dim
+        if offset != values.shape[-1]:
+            raise ValueError(
+                f"Action stat {name} last dimension {values.shape[-1]} does not match key dims {dims}"
+            )
+    return grouped
+
+
+def obs_eef_quat_to_xyz_rot6d(pos, quat_xyzw) -> np.ndarray:
+    """Match training ``state.right_eef``: xyz plus the first two rotation-matrix rows.
+
+    Robosuite stores ``robot0_eef_quat`` in xyzw order.
+    """
+    position = np.asarray(pos, dtype=np.float64).reshape(3)
+    quat = np.asarray(quat_xyzw, dtype=np.float64).reshape(4)
+    matrix = Rotation.from_quat(quat).as_matrix()
+    rot6d = matrix[:2, :].reshape(6)
+    return np.concatenate([position, rot6d]).astype(np.float32)
+
+
+class AdaptiveEnsembler:
+    def __init__(self, pred_action_horizon, adaptive_ensemble_alpha=0.0):
+        self.pred_action_horizon = pred_action_horizon
+        self.action_history = deque(maxlen=self.pred_action_horizon)
+        self.adaptive_ensemble_alpha = adaptive_ensemble_alpha
+
+    def reset(self):
+        self.action_history.clear()
+
+    def ensemble_action(self, cur_action):
+        self.action_history.append(cur_action)
+        num_actions = len(self.action_history)
+        if cur_action.ndim == 1:
+            curr_act_preds = np.stack(self.action_history)
+        else:
+            curr_act_preds = np.stack(
+                [pred_actions[i] for (i, pred_actions) in zip(range(num_actions - 1, -1, -1), self.action_history)]
+            )
+
+        # calculate cosine similarity between the current prediction and all previous predictions
+        ref = curr_act_preds[num_actions - 1, :]
+        previous_pred = curr_act_preds
+        dot_product = np.sum(previous_pred * ref, axis=1)
+        norm_previous_pred = np.linalg.norm(previous_pred, axis=1)
+        norm_ref = np.linalg.norm(ref)
+        cos_similarity = dot_product / (norm_previous_pred * norm_ref + 1e-7)
+
+        # compute the weights for each prediction
+        weights = np.exp(self.adaptive_ensemble_alpha * cos_similarity)
+        weights = weights / weights.sum()
+
+        # compute the weighted average across all predictions for this timestep
+        cur_action = np.sum(weights[:, None] * curr_act_preds, axis=0)
+
+        return cur_action
+
+
+class PolicyModel:
+    def __init__(
+        self,
+        policy_ckpt_path,
+        unnorm_key: Optional[str] = None,
+        policy_setup: str = "franka",
+        horizon: int = 0,
+        action_ensemble=True,
+        action_ensemble_horizon: Optional[int] = 3,  # different cross sim
+        image_size: list[int] = [224, 224],
+        use_ddim: bool = True,
+        num_ddim_steps: int = 10,
+        adaptive_ensemble_alpha=0.1,
+        host="0.0.0.0",
+        port=10095,
+        use_bf16=True,
+        use_canonical_forward: bool = False,
+        gripper_open_sign: str = "positive",
+    ) -> None:
+
+        if gripper_open_sign not in ("positive", "negative"):
+            raise ValueError(
+                f"gripper_open_sign must be 'positive' or 'negative', got {gripper_open_sign!r}"
+            )
+        # build client to connect server policy
+        self.policy_setup = policy_setup
+        self.unnorm_key = unnorm_key
+        self.gripper_open_sign = gripper_open_sign
+        canonical_override = (
+            "framework.action_model.diffusion_model_cfg.use_canonical_forward="
+            + str(bool(use_canonical_forward)).lower()
+        )
+        print(f"Applying config override: {canonical_override}")
+        vla = baseframework.from_pretrained(  # TODO should auto detect framework from model path
+            policy_ckpt_path,
+            config_overrides=[canonical_override],
+        )
+
+        if use_bf16:  # False
+            vla = vla.to(torch.bfloat16)
+        self.vla = vla.to("cuda").eval()
+
+        print(f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key}, gripper_open_sign: {gripper_open_sign} ***")
+        self.use_ddim = use_ddim
+        self.num_ddim_steps = num_ddim_steps
+        self.image_size = image_size
+        self.horizon = horizon  # 0
+        self.action_ensemble = action_ensemble
+        self.adaptive_ensemble_alpha = adaptive_ensemble_alpha
+        self.action_ensemble_horizon = action_ensemble_horizon
+        self.sticky_action_is_on = False
+        self.gripper_action_repeat = 0
+        self.sticky_gripper_action = 0.0
+        self.previous_gripper_action = None
+
+        self.task_description = None
+        self.image_history = deque(maxlen=self.horizon)
+        if self.action_ensemble:
+            self.action_ensembler = AdaptiveEnsembler(self.action_ensemble_horizon, self.adaptive_ensemble_alpha)
+        else:
+            self.action_ensembler = None
+        self.num_image_history = 0
+
+        self.action_norm_stats = self.get_action_stats(self.unnorm_key, policy_ckpt_path=policy_ckpt_path)
+        self.action_chunk_size = self.get_action_chunk_size(policy_ckpt_path=policy_ckpt_path)
+        self._relative_processor = None
+        self._canonical_processor = None
+
+    def _add_image_to_history(self, image: np.ndarray) -> None:
+        self.image_history.append(image)
+        self.num_image_history = min(self.num_image_history + 1, self.horizon)
+
+    def reset(self, task_description: str) -> None:
+        self.task_description = task_description
+        self.image_history.clear()
+        if self.action_ensemble:
+            self.action_ensembler.reset()
+        self.num_image_history = 0
+
+        self.sticky_action_is_on = False
+        self.gripper_action_repeat = 0
+        self.sticky_gripper_action = 0.0
+        self.previous_gripper_action = None
+
+    def infer_action_chunk(self, example: dict) -> np.ndarray:
+        """Stateless chunk inference. ``example['image']`` is already resized.
+
+        This is the ``step % action_chunk_size == 0`` branch of ``step``. The
+        returned array is ``(chunk, 7)`` OSC for a 10-d model, or ``(chunk, 10)``
+        absolute xyz+rot6d+gripper for a 90-d canonical model.
+        """
+        vla_input = {
+            "do_sample": False,
+            "use_ddim": self.use_ddim,
+            "num_ddim_steps": self.num_ddim_steps,
+        }
+        example = dict(example)
+        example["robot_tag"] = _CANONICAL_ROBOT_TYPE
+        response = self.vla.predict_action(example, **vla_input)
+        normalized_actions = response["normalized_actions"]  # B, chunk, D
+        normalized_actions = normalized_actions[0]
+        if normalized_actions.shape[1] == _CANONICAL_ACTION_DIM:
+            raw_right_eef = example.get("raw_right_eef")
+            if raw_right_eef is None:
+                raise ValueError("90-d canonical inference requires raw_right_eef")
+            return self._canonical_absolute_targets(normalized_actions, raw_right_eef)
+        # 10-d checkpoints keep the direct q01/q99 OSC decode. raw_right_eef is ignored.
+        if normalized_actions.shape[1] == 10:
+            return self.unnormalize_rot6d_actions(
+                normalized_actions=normalized_actions, action_norm_stats=self.action_norm_stats
+            )
+        if normalized_actions.shape[1] > 7:
+            normalized_actions = normalized_actions[:, -7:]
+        return self.unnormalize_actions(
+            normalized_actions=normalized_actions,
+            action_norm_stats=self.action_norm_stats,
+            gripper_open_sign=self.gripper_open_sign,
+        )
+
+    def step(self, example: dict, step: int = 0, **kwargs) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+        """
+        Perform one step of inference
+        :param image: Input image in the format (H, W, 3), type uint8
+        :param task_description: Task description text
+        :return: (raw action, processed action)
+        """
+
+        task_description = example.get("lang", None)
+        images = example["image"]  # list of images for history
+
+        if example is not None:
+            if task_description != self.task_description:
+                self.reset(task_description)
+
+        images = [self._resize_image(image) for image in images]
+        example["image"] = images
+
+        action_chunk_size = self.action_chunk_size
+        if step % action_chunk_size == 0:
+            self.raw_actions = self.infer_action_chunk(example)
+
+        raw_actions = self.raw_actions[step % action_chunk_size][None]
+
+        raw_action = {
+            "world_vector": np.array(raw_actions[0, :3]),
+            "rotation_delta": np.array(raw_actions[0, 3:6]),
+            "open_gripper": np.array(raw_actions[0, 6:7]),  # range [0, 1]; 1 = open; 0 = close
+        }
+
+        return {"raw_action": raw_action}
+
+    def _canonical_decode_processor(self) -> StarVLAPackProcessor:
+        if self._canonical_processor is not None:
+            return self._canonical_processor
+        config_path = Path(__file__).resolve().parents[2] / "train_files" / "data_registry" / "data_config.py"
+        spec = importlib.util.spec_from_file_location("libero_plus_data_config", config_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load LIBERO-plus data config from {config_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data_config = module.LiberoPlusRot6dDataConfig()
+        modality_configs = data_config_to_gr00t_modality_configs(data_config)
+        keys = [key.split(".", 1)[-1] for key in data_config.action_keys]
+        dims = [int(data_config.action_key_dims[key]) for key in data_config.action_keys]
+        grouped = _split_flat_action_stats(self.action_norm_stats, keys, dims)
+        action_configs = modality_configs["action"].action_configs or []
+        relative = {
+            key: grouped[key]
+            for key, action_config in zip(keys, action_configs)
+            if action_config.rep.name == "RELATIVE"
+        }
+        layout = load_layout(_CANONICAL_LAYOUT)
+        robot_maps = load_robot_maps(_CANONICAL_ROBOTS, layout)
+        processor = StarVLAPackProcessor(
+            modality_configs={_CANONICAL_ROBOT_TYPE: modality_configs},
+            include_state=False,
+            use_percentiles=bool(self.action_norm_stats.get("use_percentiles", True)),
+            clip_outliers=True,
+            use_relative_action=True,
+            canonical_layout=layout,
+            robot_maps=robot_maps,
+        )
+        processor.set_statistics(
+            {_CANONICAL_ROBOT_TYPE: {"action": grouped, "relative_action": relative}},
+            override=True,
+        )
+        self._canonical_processor = processor
+        return processor
+
+    def _canonical_absolute_targets(self, normalized_actions: np.ndarray, raw_right_eef) -> np.ndarray:
+        """90-d normalized chunk -> absolute xyz+rot6d and gripper, shape (chunk, 10).
+
+        Slots come from the canonical layout. OSC scaling happens on the client
+        against the live end-effector, not against this chunk-start pose.
+        """
+        current = np.asarray(raw_right_eef, dtype=np.float32).reshape(-1)
+        if current.shape[0] != 9:
+            raise ValueError(f"raw_right_eef must have length 9, got {current.shape}")
+        processor = self._canonical_decode_processor()
+        decoded = processor.decode_action(
+            np.asarray(normalized_actions, dtype=np.float32),
+            _CANONICAL_ROBOT_TYPE,
+            state={"right_eef": current[None, :]},
+        )
+        absolute_eef = np.asarray(decoded["right_eef"], dtype=np.float32)
+        gripper = np.asarray(decoded["right_gripper"], dtype=np.float32).reshape(-1, 1)
+        if absolute_eef.shape[-1] != 9:
+            raise ValueError(f"Expected absolute right_eef width 9, got {absolute_eef.shape}")
+        return np.concatenate([absolute_eef, gripper], axis=-1)
+
+    def _relative_decode_processor(self) -> StarVLAPackProcessor:
+        if self._relative_processor is not None:
+            return self._relative_processor
+        config_path = Path(__file__).resolve().parents[2] / "train_files" / "data_registry" / "data_config.py"
+        spec = importlib.util.spec_from_file_location("libero_plus_data_config", config_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load LIBERO-plus data config from {config_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data_config = module.LiberoPlusRot6dDataConfig()
+        modality_configs = data_config_to_gr00t_modality_configs(data_config)
+        tag = data_config.embodiment_tag.value
+        keys = list(data_config.action_keys)
+        dims = [int(data_config.action_key_dims[key]) for key in keys]
+        grouped = _split_flat_action_stats(self.action_norm_stats, [key.split(".", 1)[-1] for key in keys], dims)
+        action_configs = modality_configs["action"].action_configs or []
+        relative = {
+            key: grouped[key]
+            for key, action_config in zip([key.split(".", 1)[-1] for key in keys], action_configs)
+            if action_config.rep.name == "RELATIVE"
+        }
+        use_percentiles = bool(self.action_norm_stats.get("use_percentiles", True))
+        processor = StarVLAPackProcessor(
+            modality_configs={tag: modality_configs},
+            include_state=False,
+            use_percentiles=use_percentiles,
+            clip_outliers=True,
+            use_relative_action=True,
+        )
+        processor.set_statistics({tag: {"action": grouped, "relative_action": relative}}, override=True)
+        self._relative_processor = processor
+        self._relative_tag = tag
+        return processor
+
+    def _absolute_rot6d_to_osc(self, normalized_actions: np.ndarray, raw_right_eef) -> np.ndarray:
+        """Unnormalize a relative chunk, restore the absolute pose, then make an OSC delta.
+
+        ``raw_right_eef`` is the current observation as xyz+rot6d, the same layout as
+        training ``state.right_eef``. LIBERO still consumes a 7-vector: world-frame
+        xyz delta, rotvec, gripper. The 0.05 m and 0.5 rad scales are the controller
+        input ranges used by the previous rot6d eval path.
+        """
+        current = np.asarray(raw_right_eef, dtype=np.float32).reshape(-1)
+        if current.shape[0] != 9:
+            raise ValueError(f"raw_right_eef must have length 9, got {current.shape}")
+        processor = self._relative_decode_processor()
+        decoded = processor.decode_action(
+            np.asarray(normalized_actions, dtype=np.float32),
+            self._relative_tag,
+            state={"right_eef": current[None, :]},
+        )
+        absolute_eef = np.asarray(decoded["right_eef"], dtype=np.float64)
+        gripper = np.asarray(decoded["right_gripper"], dtype=np.float32).reshape(-1, 1)
+        current_pose = EndEffectorPose(
+            translation=current[:3], rotation=current[3:], rotation_type="rot6d"
+        )
+        delta_xyz = (absolute_eef[:, :3] - current[:3]) / _ROT6D_POSITION_SCALE_M
+        rotvecs = np.empty((absolute_eef.shape[0], 3), dtype=np.float64)
+        current_rotation = current_pose.homogeneous[:3, :3]
+        for index, row in enumerate(absolute_eef):
+            target = EndEffectorPose.from_action_format(row, ActionFormat.XYZ_ROT6D)
+            # OSC_POSE left-multiplies: R_delta = R_target @ R_current.T.
+            rotation_delta = target.homogeneous[:3, :3] @ current_rotation.T
+            rotvecs[index] = Rotation.from_matrix(rotation_delta).as_rotvec()
+        rotvecs = rotvecs / _ROT6D_ROTATION_SCALE_RAD
+        return np.concatenate([delta_xyz, rotvecs, gripper], axis=-1).astype(np.float32)
+
+    @staticmethod
+    def unnormalize_actions(
+        normalized_actions: np.ndarray,
+        action_norm_stats: Dict[str, np.ndarray],
+        gripper_open_sign: str = "positive",
+    ) -> np.ndarray:
+        mask = action_norm_stats.get("mask", np.ones_like(action_norm_stats["min"], dtype=bool))
+        action_high, action_low = np.array(action_norm_stats["max"]), np.array(action_norm_stats["min"])
+        normalized_actions = np.clip(normalized_actions, -1, 1)
+        gripper = normalized_actions[:, 6]
+        if gripper_open_sign == "negative":
+            # Raw LIBERO labels: -1 open, +1 close. Map onto the 0/1 open signal
+            # that the existing min/max unnorm and rollout binarize already expect.
+            open_signal = np.where(gripper < 0.0, 1.0, 0.0)
+        elif gripper_open_sign == "positive":
+            open_signal = np.where(gripper < 0.5, 0.0, 1.0)
+        else:
+            raise ValueError(
+                f"gripper_open_sign must be 'positive' or 'negative', got {gripper_open_sign!r}"
+            )
+        normalized_actions[:, 6] = open_signal
+        actions = np.where(
+            mask,
+            0.5 * (normalized_actions + 1) * (action_high - action_low) + action_low,
+            normalized_actions,
+        )
+
+        return actions
+
+    @staticmethod
+    def unnormalize_rot6d_actions(
+        normalized_actions: np.ndarray, action_norm_stats: Dict[str, np.ndarray]
+    ) -> np.ndarray:
+        """q01/q99 10-d xyz+rot6d+gripper -> LIBERO OSC command (chunk, 7).
+
+        Gripper stays in the unnormalized [0, 1] range. ``libero_rollout`` binarizes it.
+        """
+        if "q01" not in action_norm_stats or "q99" not in action_norm_stats:
+            raise KeyError("10-d rot6d decode requires q01/q99 in dataset_statistics.json")
+        q01 = np.asarray(action_norm_stats["q01"], dtype=np.float64)
+        q99 = np.asarray(action_norm_stats["q99"], dtype=np.float64)
+        if q01.shape[-1] != 10 or q99.shape[-1] != 10:
+            raise ValueError(f"Expected 10-d q01/q99, got {q01.shape} and {q99.shape}")
+        span = np.maximum(q99 - q01, 1e-8)
+        normalized = np.clip(np.asarray(normalized_actions, dtype=np.float64), -1.0, 1.0)
+        actions = 0.5 * (normalized + 1.0) * span + q01
+        xyz_m = actions[:, 0:3]
+        rotvec = PolicyModel._rot6d_to_rotvec(actions[:, 3:9])
+        gripper = actions[:, 9:10]
+        return np.concatenate(
+            [
+                xyz_m / _ROT6D_POSITION_SCALE_M,
+                rotvec / _ROT6D_ROTATION_SCALE_RAD,
+                gripper,
+            ],
+            axis=-1,
+        ).astype(np.float32)
+
+    @staticmethod
+    def _rot6d_to_rotvec(rot6d: np.ndarray) -> np.ndarray:
+        flat = np.asarray(rot6d, dtype=np.float64).reshape(-1, 6)
+        rotvecs = np.empty((flat.shape[0], 3), dtype=np.float64)
+        for i, row in enumerate(flat):
+            matrix = EndEffectorPose._rot6d_to_matrix(row)
+            rotvecs[i] = Rotation.from_matrix(matrix).as_rotvec()
+        return rotvecs
+
+    @staticmethod
+    def get_action_stats(unnorm_key: str, policy_ckpt_path) -> dict:
+        """
+        Duplicate stats accessor (retained for backward compatibility).
+        """
+        policy_ckpt_path = Path(policy_ckpt_path)
+        model_config, norm_stats = read_mode_config(policy_ckpt_path)  # read config and norm_stats
+
+        unnorm_key = PolicyModel._check_unnorm_key(norm_stats, unnorm_key)
+        return norm_stats[unnorm_key]["action"]
+
+    @staticmethod
+    def get_action_chunk_size(policy_ckpt_path):
+        model_config, _ = read_mode_config(policy_ckpt_path)  # read config and norm_stats
+        # import ipdb; ipdb.set_trace()
+        return model_config["framework"]["action_model"]["future_action_window_size"] + 1
+
+    def _resize_image(self, image: np.ndarray) -> np.ndarray:
+        image = cv.resize(image, tuple(self.image_size), interpolation=cv.INTER_AREA)
+        return image
+
+    def visualize_epoch(
+        self, predicted_raw_actions: Sequence[np.ndarray], images: Sequence[np.ndarray], save_path: str
+    ) -> None:
+        images = [self._resize_image(image) for image in images]
+        ACTION_DIM_LABELS = ["x", "y", "z", "roll", "pitch", "yaw", "grasp"]
+
+        img_strip = np.concatenate(np.array(images[::3]), axis=1)
+
+        # set up plt figure
+        figure_layout = [["image"] * len(ACTION_DIM_LABELS), ACTION_DIM_LABELS]
+        plt.rcParams.update({"font.size": 12})
+        fig, axs = plt.subplot_mosaic(figure_layout)
+        fig.set_size_inches([45, 10])
+
+        # plot actions
+        pred_actions = np.array(
+            [
+                np.concatenate([a["world_vector"], a["rotation_delta"], a["open_gripper"]], axis=-1)
+                for a in predicted_raw_actions
+            ]
+        )
+        for action_dim, action_label in enumerate(ACTION_DIM_LABELS):
+            # actions have batch, horizon, dim, in this example we just take the first action for simplicity
+            axs[action_label].plot(pred_actions[:, action_dim], label="predicted action")
+            axs[action_label].set_title(action_label)
+            axs[action_label].set_xlabel("Time in one episode")
+
+        axs["image"].imshow(img_strip)
+        axs["image"].set_xlabel("Time in one episode (subsampled)")
+        plt.legend()
+        plt.savefig(save_path)
+
+    @staticmethod
+    def _check_unnorm_key(norm_stats, unnorm_key):
+        """
+        Duplicate helper (retained for backward compatibility).
+        See primary _check_unnorm_key above.
+        """
+        if unnorm_key is None:
+            assert len(norm_stats) == 1, (
+                f"Your model was trained on more than one dataset, "
+                f"please pass a `unnorm_key` from the following options to choose the statistics "
+                f"used for un-normalizing actions: {norm_stats.keys()}"
+            )
+            unnorm_key = next(iter(norm_stats.keys()))
+
+        assert unnorm_key in norm_stats, (
+            f"The `unnorm_key` you chose is not in the set of available dataset statistics, "
+            f"please choose from: {norm_stats.keys()}"
+        )
+        return unnorm_key

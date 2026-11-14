@@ -1,0 +1,13 @@
+{
+  "base_checkpoint": {
+    "path": "/mnt/vla-pretrain/zh1112/pi05_assets/pi05_base_modelscope/model.safetensors",
+    "bytes": 14467165872,
+    "sha256": "0eb11ca9587678c1d2ef8cf32807c29f8ce53a2bfdfc1aa4a4c96f16fca59b0f",
+    "included": false
+  },
+  "dataset_view": "/mnt/vla-pretrain/zh1112/dataset/training_views/socks_sft35_abs_h50_20261112",
+  "frame_cache": "/mnt/vla-pretrain/zh1112/frame_cache/socks_sft35_224_pi05_pil_20261114",
+  "dataset_count": 35,
+  "valid_starts_h50": 5889598,
+  "training_weights_included": false
+}

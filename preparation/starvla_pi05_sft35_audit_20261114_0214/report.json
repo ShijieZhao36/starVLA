@@ -1,0 +1,286 @@
+{
+  "diagnostic_only": true,
+  "repo": "/mnt/vla-pretrain/zh1112/workspace/starVLA_socks_sft35_abs_h50_action5e5_40k_20261112",
+  "python": "/root/miniconda3/envs/starvla_pi05/bin/python",
+  "formal_training_started": false,
+  "source_code_modified": false,
+  "source_hashes": {
+    "starVLA/model/framework/VLM4A/PI05.py": "4deed996f772265464aa6bc3a4a95b37396da79638ced4f3faf329b56467782b",
+    "starVLA/model/framework/VLM4A/PI0.py": "8e1651f170297358743a11caad6533b9dae7573383f9f14c8ee66d666a1a3fe9",
+    "starVLA/model/modules/action_model/OpenPI_ActionHead.py": "03abef03f93e54cd78d4785b977b6633b526731ad30f617e9d5250adae1becb0",
+    "starVLA/model/modules/vlm/OpenPIPaliGemma.py": "b770f93c5c4297d3ec9eac951ca131dc96719784e5609795f1c38eea9f89ffe6",
+    "starVLA/dataloader/__init__.py": "262a928991d48da6b2c4b7dfb9a6fda0e9436c4c04c16044ea0619298b1ddeb8",
+    "starVLA/dataloader/gr00t_sharded.py": "845cdd6a170d4d560207186982fe650bb84971edcd21fcfcbb61ffd7b1e4ad02",
+    "starVLA/dataloader/gr00t_sharded_processor.py": "5d7a09fdcbf4f44241bc67db6e6895813c3e493c06b008d180c2fc40913ba3d7",
+    "starVLA/training/train_starvla.py": "068dda4a3d15c061ce99821e86d558d94e7064692282e23f1ce200f0505cc15c",
+    "starVLA/training/training_telemetry.py": "2d02529aae20bd229561aca176b8818ce8d396c43dc5ba2da87fade1eedaf714"
+  },
+  "stage": "complete",
+  "old_loader": {
+    "keys": [
+      "action",
+      "action_mask",
+      "image",
+      "lang",
+      "robot_tag"
+    ],
+    "action_shape": [
+      50,
+      90
+    ],
+    "state_shape": null,
+    "image_sizes": [
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ]
+    ],
+    "action_min": -1.0,
+    "action_max": 1.0,
+    "language": "Fold the socks together and place them on the edge of the desk"
+  },
+  "dataset_count": 35,
+  "datasets": [
+    "lerobot_socks_v1_0924",
+    "lerobot_socks_v1_0925",
+    "lerobot_socks_v1_0928",
+    "lerobot_socks_v1_0928_2",
+    "lerobot_socks_v1_0929",
+    "lerobot_socks_v1_1002day",
+    "lerobot_socks_v1_1002night",
+    "lerobot_socks_v1_1003day",
+    "lerobot_socks_v1_bent_0930night",
+    "lerobot_socks_v1_bent_1001",
+    "lerobot_socks_v1_bent_1001night",
+    "lerobot_socks_v1_color_1020",
+    "lerobot_socks_v1_color_1021",
+    "lerobot_socks_v1_color_1022",
+    "lerobot_socks_v1_overlap_1008_dropfram",
+    "lerobot_socks_v1_overlap_1009",
+    "lerobot_socks_v1_overlap_1010_dropframe",
+    "lerobot_socks_v1_overlap_1010night_dropframe",
+    "lerobot_socks_v1_overlap_1012day_dropframe",
+    "lerobot_socks_v1_overlap_long_1016day_dropframe",
+    "lerobot_socks_v1_overlap_long_1019_dropframe",
+    "lerobot_socks_v1_random_bentsegment_1003_dropframe",
+    "lerobot_socks_v1_random_bentsegment_1005_2_dropframe",
+    "lerobot_socks_v1_random_bentsegment_1005_dropfram",
+    "lerobot_socks_v1_random_bentsegment_1006_dropframe",
+    "lerobot_socks_v1_random_bentsegment_1007_dropframe",
+    "lerobot_socks_v1_random_bentsegment_1007night_dropfram",
+    "lerobot_socks_v1_random_bentsegment_1015day_dropframe",
+    "lerobot_socks_v1_random_non-bending_0929",
+    "lerobot_socks_v1_random_non-bending_0930",
+    "lerobot_socks_v1_random_non-bending_long_1012",
+    "lerobot_socks_v1_random_non-bending_long_1013",
+    "lerobot_socks_v1_random_non-bending_long_1014day",
+    "lerobot_socks_v1_random_non-bending_long_1015day",
+    "lerobot_socks_v1_random_unbentsegment_1003day"
+  ],
+  "sampling_weights": [
+    63189.0,
+    221000.0,
+    121218.0,
+    177227.0,
+    120329.0,
+    57467.0,
+    163297.0,
+    26502.0,
+    200423.0,
+    198742.0,
+    264292.0,
+    209205.0,
+    291131.0,
+    32506.0,
+    188724.0,
+    368775.0,
+    83091.0,
+    131706.0,
+    37581.0,
+    59938.0,
+    245217.0,
+    151801.0,
+    192517.0,
+    105033.0,
+    116185.0,
+    172268.0,
+    219304.0,
+    191352.0,
+    218835.0,
+    181485.0,
+    213620.0,
+    262884.0,
+    356592.0,
+    63608.0,
+    182554.0
+  ],
+  "valid_sample_mass": 5889598.0,
+  "virtual_length": 5889598,
+  "loader": {
+    "keys": [
+      "action",
+      "image",
+      "lang",
+      "robot_tag",
+      "state"
+    ],
+    "action_shape": [
+      50,
+      14
+    ],
+    "state_shape": [
+      1,
+      14
+    ],
+    "image_sizes": [
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ],
+      [
+        256,
+        256
+      ]
+    ],
+    "action_min": -1.0,
+    "action_max": 1.0,
+    "language": "Fold the socks together and place them on the edge of the desk"
+  },
+  "stats_action_bounds_max_diff_from_old": {
+    "q01": 0.0,
+    "q99": 0.0
+  },
+  "statistics_tags": [
+    "arx_x5"
+  ],
+  "checkpoint_bytes": 14467165872,
+  "checkpoint_tensors": 812,
+  "normalized_tensors": 813,
+  "model_tensors": 813,
+  "real_missing": [],
+  "expected_missing": [],
+  "shape_mismatch": {},
+  "unexpected_checkpoint_keys": [],
+  "old_lr_groups_on_pi05": [
+    {
+      "name": "base",
+      "lr": 2.5e-05,
+      "numel": 3616757520
+    }
+  ],
+  "diagnostic_pi05_lr_groups": [
+    {
+      "name": "vlm",
+      "lr": 1e-05,
+      "numel": 2923335408
+    },
+    {
+      "name": "action_head",
+      "lr": 5e-05,
+      "numel": 693422112
+    }
+  ],
+  "telemetry_group_labels": {
+    "qwen_vl_interface": "VLM",
+    "action_model": "Action"
+  },
+  "current_trainer_incompatible_groups": [
+    "vlm",
+    "action_head"
+  ],
+  "current_trainer_missing_action_model_config": true,
+  "old_90d_loader_rejected_by_pi05": "Input shape (50, 90) exceeds target (50, 32)",
+  "current_trainer_probe_dimension_error": "action targets (1, 50, 14) must match prediction batch/action dimensions and cover its horizon (1, 50, 32)",
+  "loading_seconds": 58.05670299008489,
+  "prepared_image_shape": [
+    1,
+    3,
+    3,
+    224,
+    224
+  ],
+  "prepared_state_shape": [
+    1,
+    1,
+    32
+  ],
+  "prepared_action_shape": [
+    1,
+    50,
+    32
+  ],
+  "normalized_image_range": [
+    -1.0,
+    1.0
+  ],
+  "state_changes_prompt_tokens": true,
+  "model_parameter_count": 3616757520,
+  "updates": [
+    {
+      "step": 1,
+      "loss": 0.34417757391929626,
+      "valid14_velocity_mse": 0.2954173982143402,
+      "padding18_velocity_mse": 0.3821021318435669,
+      "gradient_norms": {
+        "VLM": 8.413119316101074,
+        "Action": 3.7748053073883057
+      },
+      "action_weights_changed": true,
+      "elapsed_seconds": 0.9067088380688801,
+      "peak_allocated_gib": 25.879092693328857,
+      "peak_reserved_gib": 26.40625
+    },
+    {
+      "step": 2,
+      "loss": 0.30723947286605835,
+      "valid14_velocity_mse": 0.1402495950460434,
+      "padding18_velocity_mse": 0.43712058663368225,
+      "gradient_norms": {
+        "VLM": 4.071591377258301,
+        "Action": 2.666757106781006
+      },
+      "action_weights_changed": true,
+      "elapsed_seconds": 0.33238248294219375,
+      "peak_allocated_gib": 28.325188636779785,
+      "peak_reserved_gib": 32.8203125
+    },
+    {
+      "step": 3,
+      "loss": 0.04522796347737312,
+      "valid14_velocity_mse": 0.09372129291296005,
+      "padding18_velocity_mse": 0.007510937750339508,
+      "gradient_norms": {
+        "VLM": 0.7981864213943481,
+        "Action": 0.5574086904525757
+      },
+      "action_weights_changed": true,
+      "elapsed_seconds": 0.30627269798424095,
+      "peak_allocated_gib": 28.334050178527832,
+      "peak_reserved_gib": 32.8203125
+    }
+  ],
+  "inference_shape": [
+    1,
+    50,
+    32
+  ],
+  "inference_finite": true,
+  "inference_first14_minmax": [
+    -0.6783987879753113,
+    1.0610116720199585
+  ],
+  "diagnostic_passed": true,
+  "full_8gpu_trainer_passed": false
+}

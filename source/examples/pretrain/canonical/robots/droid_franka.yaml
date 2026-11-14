@@ -1,0 +1,20 @@
+# DROID's single Franka arm uses the same right-arm canonical slots as LIBERO.
+# Native 17-D order: arm_eef[0:9], arm_gripper[9:10], arm_joints[10:17].
+# All 17 dimensions are supervised; every other canonical slot is masked out.
+# The action processor converts arm_eef to a chunk-start relative pose before
+# packing. Gripper remains 1=open/0=closed; joint targets remain absolute radians.
+robot_type: droid_franka_rot6d
+action:
+  - field: right.eef_pose
+    source: arm_eef
+  - field: right.gripper
+    source: arm_gripper
+  - field: right.joint_pos
+    source: arm_joints
+state:
+  - field: right.eef_pose
+    source: arm_eef
+  - field: right.gripper
+    source: arm_gripper
+  - field: right.joint_pos
+    source: arm_joints

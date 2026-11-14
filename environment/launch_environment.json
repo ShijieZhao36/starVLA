@@ -1,0 +1,14 @@
+{
+  "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+  "OMP_NUM_THREADS": "4",
+  "OPENBLAS_NUM_THREADS": "1",
+  "MKL_NUM_THREADS": "1",
+  "TOKENIZERS_PARALLELISM": "false",
+  "HF_HUB_OFFLINE": "1",
+  "TRANSFORMERS_OFFLINE": "1",
+  "WANDB_MODE": "disabled",
+  "NCCL_DEBUG": "WARN",
+  "PYTHONPATH": "/mnt/vla-pretrain/zh1112/workspace/starVLA_pi05_sft35_20261114",
+  "PYTHONUNBUFFERED": "1",
+  "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+}
